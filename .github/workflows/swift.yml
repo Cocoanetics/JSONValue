@@ -34,7 +34,7 @@ jobs:
         with:
           xcode-version: "26.0"
       - name: Build (iOS)
-        run: xcodebuild -scheme JSONValue -destination 'generic/platform=iOS' build
+        run: xcodebuild -scheme JSONFoundation -destination 'generic/platform=iOS' build
 
   build-linux:
     runs-on: ubuntu-latest

@@ -84,7 +84,8 @@ extension JSONRPCError: LocalizedError {
         // detail attached there reaches callers — including MCP clients, which
         // present `error.localizedDescription` as the tool-result text.
         guard let data, data != .null,
-            let json = try? String(decoding: JSONEncoder().encode(data), as: UTF8.self)
+            let encoded = try? JSONEncoder().encode(data),
+            let json = String(bytes: encoded, encoding: .utf8)
         else {
             return "JSON-RPC error \(code): \(message)"
         }
