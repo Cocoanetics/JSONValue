@@ -108,35 +108,69 @@ public enum MCPJSONCoding {
 
     /// Builds a `JSONValue` from a Foundation JSON object graph — the `Any?`
     /// produced by `JSONSerialization` (`NSNull`, `NSNumber`, `String`,
-    /// `Array`, `Dictionary`). `nil`/`NSNull` map to `.null`.
-    public init(jsonObject value: Any?) throws {
-        guard let value else {
+    /// `Array`, `Dictionary`). `nil`/`NSNull` map to `.null`; unsupported values
+    /// trip an assertion in debug and fall back to a string description.
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
+    public init(jsonObject value: Any?) {
+        switch value {
+        case nil, is NSNull:
             self = .null
-            return
+        case let jsonValue as JSONValue:
+            self = jsonValue
+        case let bool as Bool:
+            self = .bool(bool)
+        case let int as Int:
+            self = .integer(int)
+        case let int8 as Int8:
+            self = .integer(Int(int8))
+        case let int16 as Int16:
+            self = .integer(Int(int16))
+        case let int32 as Int32:
+            self = .integer(Int(int32))
+        case let int64 as Int64:
+            self = Int(exactly: int64).map(JSONValue.integer) ?? .double(Double(int64))
+        case let uint as UInt:
+            self = .unsignedInteger(uint)
+        case let uint8 as UInt8:
+            self = .unsignedInteger(UInt(uint8))
+        case let uint16 as UInt16:
+            self = .unsignedInteger(UInt(uint16))
+        case let uint32 as UInt32:
+            self = .unsignedInteger(UInt(uint32))
+        case let uint64 as UInt64:
+            self = UInt(exactly: uint64).map(JSONValue.unsignedInteger) ?? .double(Double(uint64))
+        case let float as Float:
+            self = .double(Double(float))
+        case let double as Double:
+            self = .double(double)
+        case let number as NSNumber:
+            #if canImport(Darwin)
+            // On Apple platforms `Bool` bridges to `NSNumber` via `CFBoolean`;
+            // re-check via the CFTypeID since the `Bool` case only catches it
+            // sometimes. `CFBooleanGetTypeID` isn't exposed on Linux, so gate on
+            // Darwin (there the earlier `Bool` branch always wins for booleans).
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                self = .bool(number.boolValue)
+                break
+            }
+            #endif
+            if let int = Int(exactly: number.int64Value), number.doubleValue == Double(int) {
+                self = .integer(int)
+            } else if let uint = UInt(exactly: number.uint64Value), number.doubleValue == Double(uint) {
+                self = .unsignedInteger(uint)
+            } else {
+                self = .double(number.doubleValue)
+            }
+        case let string as String:
+            self = .string(string)
+        case let array as [Any]:
+            self = .array(array.map { JSONValue(jsonObject: $0) })
+        case let object as [String: Any]:
+            self = .object(object.mapValues { JSONValue(jsonObject: $0) })
+        default:
+            assertionFailure("Unsupported JSON object value: \(String(describing: value))")
+            self = .string(String(describing: value))
         }
-
-        if let result = Self.matchJSONValueOrNull(value) {
-            self = result
-            return
-        }
-        if let result = try Self.matchIntegerJSONObject(value) {
-            self = result
-            return
-        }
-        if let result = try Self.matchUnsignedIntegerJSONObject(value) {
-            self = result
-            return
-        }
-        if let result = Self.matchFloatingPointJSONObject(value) {
-            self = result
-            return
-        }
-        if let result = try Self.matchContainerJSONObject(value) {
-            self = result
-            return
-        }
-
-        throw JSONValueError.invalidJSONObject
     }
 
     public func encode(to encoder: Encoder) throws {
