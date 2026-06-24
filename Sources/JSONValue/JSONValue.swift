@@ -106,11 +106,11 @@ public enum MCPJSONCoding {
         self = try MCPJSONCoding.makeDecoder().decode(JSONValue.self, from: data)
     }
 
+    // swiftlint:disable cyclomatic_complexity function_body_length
     /// Builds a `JSONValue` from a Foundation JSON object graph — the `Any?`
     /// produced by `JSONSerialization` (`NSNull`, `NSNumber`, `String`,
     /// `Array`, `Dictionary`). `nil`/`NSNull` map to `.null`; unsupported values
     /// trip an assertion in debug and fall back to a string description.
-    // swiftlint:disable:next cyclomatic_complexity function_body_length
     public init(jsonObject value: Any?) {
         switch value {
         case nil, is NSNull:
@@ -172,6 +172,7 @@ public enum MCPJSONCoding {
             self = .string(String(describing: value))
         }
     }
+    // swiftlint:enable cyclomatic_complexity function_body_length
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
