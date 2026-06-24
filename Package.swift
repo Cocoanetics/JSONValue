@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "JSONValue",
+    name: "JSONFoundation",
     platforms: [
         .macOS("12.0"),
         .iOS("15.0"),
@@ -11,12 +11,15 @@ let package = Package(
         .macCatalyst("15.0")
     ],
     products: [
-        .library(name: "JSONValue", targets: ["JSONValue"])
+        .library(name: "JSONFoundation", targets: ["JSONFoundation"])
     ],
     targets: [
         // Pure Foundation, zero third-party dependencies — builds on every Swift
         // platform (macOS, iOS, tvOS, watchOS, Linux, Windows, Android).
-        .target(name: "JSONValue"),
-        .testTarget(name: "JSONValueTests", dependencies: ["JSONValue"])
+        // Bundles three layers under the single `JSONFoundation` module: the
+        // `JSONValue` value type, a `JSONSchema` model, and JSON-RPC 2.0 envelope
+        // types.
+        .target(name: "JSONFoundation"),
+        .testTarget(name: "JSONFoundationTests", dependencies: ["JSONFoundation"])
     ]
 )
