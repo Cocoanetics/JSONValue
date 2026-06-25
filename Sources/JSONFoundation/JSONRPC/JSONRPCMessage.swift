@@ -10,7 +10,7 @@
  This unifies all JSON-RPC message handling and makes it easier to work with collections
  of mixed message types while still being able to distinguish them in processing loops.
  */
-public enum JSONRPCMessage: Codable, Sendable {
+public enum JSONRPCMessage: Codable, Sendable, Hashable {
     case request(JSONRPCRequestData)
     case notification(JSONRPCNotificationData)
     case response(JSONRPCResponseData)
@@ -19,7 +19,7 @@ public enum JSONRPCMessage: Codable, Sendable {
     // MARK: - Data Structures
 
     /// Data structure for JSON-RPC requests (with ID, expecting response)
-    public struct JSONRPCRequestData: Codable, Sendable {
+    public struct JSONRPCRequestData: Codable, Sendable, Hashable {
         /// The JSON-RPC protocol version, always "2.0"
         public var jsonrpc: String = "2.0"
 
@@ -42,7 +42,7 @@ public enum JSONRPCMessage: Codable, Sendable {
     }
 
     /// Data structure for JSON-RPC notifications (no ID, no response expected)
-    public struct JSONRPCNotificationData: Codable, Sendable {
+    public struct JSONRPCNotificationData: Codable, Sendable, Hashable {
         /// The JSON-RPC protocol version, always "2.0"
         public var jsonrpc: String = "2.0"
 
@@ -61,7 +61,7 @@ public enum JSONRPCMessage: Codable, Sendable {
     }
 
     /// Data structure for JSON-RPC success responses
-    public struct JSONRPCResponseData: Codable, Sendable {
+    public struct JSONRPCResponseData: Codable, Sendable, Hashable {
         /// The JSON-RPC protocol version, always "2.0"
         public var jsonrpc: String = "2.0"
 
@@ -80,7 +80,7 @@ public enum JSONRPCMessage: Codable, Sendable {
     }
 
     /// Data structure for JSON-RPC error responses
-    public struct JSONRPCErrorResponseData: Codable, Sendable {
+    public struct JSONRPCErrorResponseData: Codable, Sendable, Hashable {
         // swiftlint:disable nesting
         /// Represents the error payload containing error details.
         /// Includes an error code and a descriptive message. Conforms to `Error`

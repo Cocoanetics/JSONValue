@@ -70,21 +70,46 @@ let schema: JSONSchema = .object(.init(
 ## JSON-RPC 2.0
 
 Foundation-only envelope types for JSON-RPC 2.0 — the wire model only, no
-transport (bring your own):
+transport (bring your own). Ids accept integer/string literals, messages are
+`Equatable`/`Hashable`, and encoding is the symmetric inverse of decoding:
 
 ```swift
-let request = JSONRPCMessage.request(id: .integer(1), method: "ping", params: nil)
+let request: JSONRPCMessage = .request(id: 1, method: "ping", params: ["x": .integer(1)])
 
-// Errors are throwable and carry the standard codes:
-throw JSONRPCError.methodNotFound("frobnicate")   // -32601
+// Encode one message as an object, or a batch as an array:
+let object = try request.encoded()                              // {"id":1,"jsonrpc":"2.0",…}
+let batch  = try JSONRPCMessage.encodeBatch([request, request]) // [ …, … ]
 
-// Decode a single message or a batch from raw bytes:
+// Decode a single message or a batch from raw bytes (and recover the shape):
 let messages = try JSONRPCMessage.decodeMessages(from: data)
+let wasBatch = JSONRPCMessage.isBatchPayload(data)
 ```
 
-- `JSONRPCID` — `.integer` / `.string`
-- `JSONRPCMessage` — `request` / `notification` / `response` / `errorResponse`
-- `JSONRPCError` — `Error` + `LocalizedError`, with `.parseError` / `.invalidRequest` / `.methodNotFound` / `.invalidParams` / `.internalError` factories
+Classify and read any message without switching, and correlate replies:
+
+```swift
+if message.isRequest, let method = message.method {
+    route(method, message.params)
+}
+
+switch message.replyOutcome {                 // nil for a request/notification
+case .success(let result)?: continuation.resume(returning: result)
+case .failure(let error)?:  continuation.resume(throwing: error)
+case .none: break
+}
+```
+
+Errors are throwable, carry the reserved codes, and classify their range:
+
+```swift
+throw JSONRPCError.methodNotFound("frobnicate")            // -32601
+throw JSONRPCError.serverError(code: -32050, message: "busy")
+JSONRPCError.parseError().isReservedCode                  // true
+```
+
+- `JSONRPCID` — `.integer` / `.string`; `ExpressibleBy{Integer,String}Literal`, `intValue` / `stringValue` / `description`
+- `JSONRPCMessage` — `request` / `notification` / `response` / `errorResponse`; `Equatable` + `Hashable`; accessors `id` / `method` / `params` / `result` / `error`, predicates `isRequest` / `isNotification` / `isResponse` / `isErrorResponse` / `isReply`, `replyOutcome`, `validate()`; framing `encoded()` / `encodedString()` / `encodeBatch(_:)` / `decodeMessages(from:)` / `isBatchPayload(_:)`
+- `JSONRPCError` — `Error` + `LocalizedError`; factories `.parseError` / `.invalidRequest` / `.methodNotFound` / `.invalidParams` / `.internalError` / `.serverError`; range checks `isReservedCode` / `isServerError`
 
 ## Installation
 
