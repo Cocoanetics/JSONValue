@@ -4,11 +4,24 @@ import Foundation
  A coding key that can be initialized with any string value.
  Used for encoding and decoding dynamic property names in JSON schemas.
  */
-struct AnyCodingKey: CodingKey {
+public struct AnyCodingKey: CodingKey {
     /// The string value of the coding key
-    var stringValue: String
+    public var stringValue: String
     /// The integer value of the coding key, if any
-    var intValue: Int?
+    public var intValue: Int?
+
+    /**
+     Creates a coding key from a string value (always succeeds).
+
+     The non-failable counterpart to ``init(stringValue:)`` — convenient when the
+     key is known to be a plain string, e.g. a tagged-union discriminator.
+
+     - Parameter stringValue: The string value for the key
+     */
+    public init(_ stringValue: String) {
+        self.stringValue = stringValue
+        self.intValue = nil
+    }
 
     /**
      Creates a coding key from a string value.
@@ -16,7 +29,7 @@ struct AnyCodingKey: CodingKey {
      - Parameter stringValue: The string value for the key
      - Returns: A coding key, or nil if the string value is invalid
      */
-    init?(stringValue: String) {
+    public init?(stringValue: String) {
         self.stringValue = stringValue
         self.intValue = nil
     }
@@ -27,7 +40,7 @@ struct AnyCodingKey: CodingKey {
      - Parameter intValue: The integer value for the key
      - Returns: A coding key, or nil if the integer value is invalid
      */
-    init?(intValue: Int) {
+    public init?(intValue: Int) {
         self.stringValue = String(intValue)
         self.intValue = intValue
     }
