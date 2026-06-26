@@ -42,11 +42,6 @@ final class LoopbackTransport: JSONRPCMessageTransport, @unchecked Sendable {
     func close() { finishInbound() }
 }
 
-private actor Recorder {
-    private(set) var methods: [String] = []
-    func record(_ method: String) { methods.append(method) }
-}
-
 @Test func correlatesRequestWithItsResponse() async throws {
     let transport = LoopbackTransport()
     transport.onSend = { message, transport in
@@ -78,20 +73,71 @@ private actor Recorder {
     await peer.close()
 }
 
-@Test func deliversInboundNotificationsToHandler() async throws {
+@Test(.timeLimit(.minutes(1)))
+func deliversInboundNotificationsToHandler() async throws {
     let transport = LoopbackTransport()
-    let recorder = Recorder()
+    let delivered = OnceBox<String>()
     let peer = JSONRPCPeer(transport: transport)
-    await peer.setHandlers(request: nil, notification: { method, _ in await recorder.record(method) })
+    await peer.setHandlers(request: nil, notification: { method, _ in delivered.fire(method) })
     await peer.start()
 
     transport.inject(.notification(method: "window/logMessage", params: .string("hi")))
-    try await Task.sleep(for: .milliseconds(100))
-    #expect(await recorder.methods == ["window/logMessage"])
+    #expect(await delivered.value == "window/logMessage")
     await peer.close()
 }
 
-@Test func dispatchesInboundRequestsAndRepliesWithHandlerResult() async throws {
+/// Inject `request` and await the peer's outbound reply — deterministically, with no
+/// sleep or poll. Inbound requests are answered from a separate task (so the read loop
+/// isn't parked inside an arbitrary handler — see `dispatchRequest`), so the reply
+/// arrives asynchronously. Register the transport's synchronous `onSend` hook *before*
+/// injecting, so the reply can't be missed, and resume the instant it's sent. Each
+/// caller carries a `.timeLimit`, so a regression that never replies fails rather than
+/// hanging.
+private func injectAndAwaitReply(
+    _ transport: LoopbackTransport, _ request: JSONRPCMessage
+) async -> JSONRPCMessage {
+    let reply = OnceBox<JSONRPCMessage>()
+    transport.onSend = { message, _ in if message.id == request.id { reply.fire(message) } }
+    transport.inject(request)
+    return await reply.value
+}
+
+/// A one-shot async box: `fire` (called from a synchronous callback) delivers a value
+/// and `value` awaits it — either order works, so there's no sleep or poll. Resolves
+/// exactly once.
+private final class OnceBox<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value?
+    private var continuation: CheckedContinuation<Value, Never>?
+    func fire(_ value: Value) {
+        lock.lock()
+        if let continuation {
+            self.continuation = nil
+            lock.unlock()
+            continuation.resume(returning: value)
+        } else {
+            if stored == nil { stored = value }
+            lock.unlock()
+        }
+    }
+    var value: Value {
+        get async {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                if let stored {
+                    lock.unlock()
+                    continuation.resume(returning: stored)
+                } else {
+                    self.continuation = continuation
+                    lock.unlock()
+                }
+            }
+        }
+    }
+}
+
+@Test(.timeLimit(.minutes(1)))
+func dispatchesInboundRequestsAndRepliesWithHandlerResult() async throws {
     let transport = LoopbackTransport()
     let peer = JSONRPCPeer(transport: transport)
     await peer.setHandlers(
@@ -99,25 +145,22 @@ private actor Recorder {
         notification: nil)
     await peer.start()
 
-    transport.inject(.request(id: 99, method: "doThing", params: nil))
-    try await Task.sleep(for: .milliseconds(100))
-
-    let reply = transport.sent.first { $0.id == .integer(99) }
-    #expect(reply?.result?.stringValue == "handled:doThing")
+    let reply = await injectAndAwaitReply(
+        transport, .request(id: 99, method: "doThing", params: nil))
+    #expect(reply.result?.stringValue == "handled:doThing")
     await peer.close()
 }
 
-@Test func acknowledgesInboundRequestsWithNullWhenNoHandler() async throws {
+@Test(.timeLimit(.minutes(1)))
+func acknowledgesInboundRequestsWithNullWhenNoHandler() async throws {
     let transport = LoopbackTransport()
     let peer = JSONRPCPeer(transport: transport)
     await peer.setHandlers(request: nil, notification: nil)
     await peer.start()
 
-    transport.inject(.request(id: 7, method: "client/registerCapability", params: nil))
-    try await Task.sleep(for: .milliseconds(100))
-
-    let reply = transport.sent.first { $0.id == .integer(7) }
-    #expect(reply?.isResponse == true)
+    let reply = await injectAndAwaitReply(
+        transport, .request(id: 7, method: "client/registerCapability", params: nil))
+    #expect(reply.isResponse == true)
     await peer.close()
 }
 

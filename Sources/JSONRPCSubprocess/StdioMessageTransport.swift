@@ -81,6 +81,17 @@ public final class StdioMessageTransport<Framing: MessageFraming>: JSONRPCMessag
         let arguments = Arguments(launch.arguments)
         let workingDirectory = launch.workingDirectory.map { FilePath($0) }
         let inheritStderr = launch.inheritStderr
+        // Honor a caller-supplied environment as a full replacement — matching the
+        // `Foundation.Process` transport's `process.environment = launch.environment`
+        // (e.g. an ACP/MCP client injecting auth vars into the agent it spawns). `nil`
+        // inherits the parent's. `Environment.Key`'s only runtime-constructible entry
+        // point is its `ExpressibleByStringLiteral` init; a `reduce` (not
+        // `uniqueKeysWithValues`) avoids a duplicate-key trap on case-folding platforms.
+        let environment: Environment = launch.environment.map { vars in
+            .custom(vars.reduce(into: [Environment.Key: String]()) {
+                $0[Environment.Key(stringLiteral: $1.key)] = $1.value
+            })
+        } ?? .inherit
 
         return Task {
             do {
@@ -89,7 +100,7 @@ public final class StdioMessageTransport<Framing: MessageFraming>: JSONRPCMessag
                 // the I/O pump is shared.
                 if inheritStderr {
                     _ = try await run(
-                        executable, arguments: arguments, environment: .inherit,
+                        executable, arguments: arguments, environment: environment,
                         workingDirectory: workingDirectory,
                         input: .inputWriter, output: .sequence, error: .currentStandardError
                     ) { execution in
@@ -97,7 +108,7 @@ public final class StdioMessageTransport<Framing: MessageFraming>: JSONRPCMessag
                     }
                 } else {
                     _ = try await run(
-                        executable, arguments: arguments, environment: .inherit,
+                        executable, arguments: arguments, environment: environment,
                         workingDirectory: workingDirectory,
                         input: .inputWriter, output: .sequence, error: .discarded
                     ) { execution in
