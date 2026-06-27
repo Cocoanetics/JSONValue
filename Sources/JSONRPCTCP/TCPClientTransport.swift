@@ -10,6 +10,12 @@ import JSONRPCWire
 import Darwin
 #elseif canImport(Glibc)
 import Glibc
+#elseif canImport(Musl)
+import Musl
+#elseif canImport(Android)
+import Android
+#elseif canImport(Bionic)
+import Bionic
 #endif
 
 /// Errors specific to opening the TCP client transport.
@@ -55,7 +61,8 @@ public final class TCPClientTransport<Framing: MessageFraming>: JSONRPCMessageTr
 
         var hints = addrinfo()
         hints.ai_family = AF_UNSPEC
-        #if canImport(Glibc)
+        // On Glibc/Musl `SOCK_STREAM` is an enum; on Darwin/Bionic it is an Int32.
+        #if canImport(Glibc) || canImport(Musl)
         hints.ai_socktype = Int32(SOCK_STREAM.rawValue)
         #else
         hints.ai_socktype = SOCK_STREAM

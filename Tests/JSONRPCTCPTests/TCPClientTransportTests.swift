@@ -1,4 +1,7 @@
-#if !os(Windows)
+// The transport itself compiles on every POSIX platform (Darwin / Glibc / Musl /
+// Bionic); the integration test — which spins a local listener and threads — runs
+// on macOS and Linux, matching the stdio transport's test gating.
+#if os(macOS) || os(Linux)
 import Foundation
 import Testing
 import JSONFoundation
