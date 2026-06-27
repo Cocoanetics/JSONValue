@@ -13,7 +13,7 @@ struct LoopbackTransportTests {
 
         let server = JSONRPCPeer(transport: serverTransport)
         await server.setHandlers(
-            request: { method, params in .success(.string("pong:\(method)")) },
+            request: { method, _ in .success(.string("pong:\(method)")) },
             notification: nil
         )
         await server.start()
@@ -37,7 +37,7 @@ struct LoopbackTransportTests {
         let server = JSONRPCPeer(transport: serverTransport)
         await server.setHandlers(
             request: nil,
-            notification: { method, params in await received.record(method) }
+            notification: { method, _ in await received.record(method) }
         )
         await server.start()
 

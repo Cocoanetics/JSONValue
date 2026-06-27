@@ -43,13 +43,13 @@ public final class LoopbackTransport: JSONRPCMessageTransport, @unchecked Sendab
     /// peer. What one `send`s arrives on the other's inbound stream. Closing either
     /// end ends the other's inbound stream.
     public static func pair() -> (client: LoopbackTransport, server: LoopbackTransport) {
-        let a = LoopbackTransport()
-        let b = LoopbackTransport()
-        a.deliver = { [weak b] message in b?.receive(message) }
-        b.deliver = { [weak a] message in a?.receive(message) }
-        a.closePeer = { [weak b] in b?.close() }
-        b.closePeer = { [weak a] in a?.close() }
-        return (a, b)
+        let client = LoopbackTransport()
+        let server = LoopbackTransport()
+        client.deliver = { [weak server] message in server?.receive(message) }
+        server.deliver = { [weak client] message in client?.receive(message) }
+        client.closePeer = { [weak server] in server?.close() }
+        server.closePeer = { [weak client] in client?.close() }
+        return (client, server)
     }
 
     private func receive(_ message: JSONRPCMessage) {

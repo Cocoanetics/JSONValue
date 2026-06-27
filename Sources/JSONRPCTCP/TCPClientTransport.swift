@@ -49,7 +49,7 @@ public enum TCPClientTransportError: Error, LocalizedError {
 /// with no dependency beyond the platform C library.
 public final class TCPClientTransport<Framing: MessageFraming>: JSONRPCMessageTransport, @unchecked Sendable {
     private let framing: Framing
-    private let fd: Int32
+    private let descriptor: Int32
     private let writeLock = NSLock()
     private let stateLock = NSLock()
     private var isClosed = false
@@ -102,7 +102,7 @@ public final class TCPClientTransport<Framing: MessageFraming>: JSONRPCMessageTr
             let detail = String(cString: strerror(lastErrno))
             throw TCPClientTransportError.connectionFailed(host: host, port: port, detail: detail)
         }
-        self.fd = socketFD
+        self.descriptor = socketFD
     }
 
     public func send(_ message: JSONRPCMessage) throws {
@@ -118,7 +118,7 @@ public final class TCPClientTransport<Framing: MessageFraming>: JSONRPCMessageTr
             guard var pointer = raw.baseAddress else { return }
             var remaining = raw.count
             while remaining > 0 {
-                let written = write(fd, pointer, remaining)
+                let written = write(descriptor, pointer, remaining)
                 if written <= 0 {
                     throw TCPClientTransportError.connectionFailed(
                         host: "", port: 0, detail: "socket write failed (errno \(errno))"
@@ -132,13 +132,13 @@ public final class TCPClientTransport<Framing: MessageFraming>: JSONRPCMessageTr
 
     public func makeInboundStream() -> AsyncThrowingStream<JSONRPCMessage, any Error> {
         let framing = self.framing
-        let fd = self.fd
+        let descriptor = self.descriptor
         return AsyncThrowingStream { continuation in
             let thread = Thread {
                 var decoder = framing
                 var buffer = [UInt8](repeating: 0, count: 64 * 1024)
                 while true {
-                    let count = buffer.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
+                    let count = buffer.withUnsafeMutableBytes { read(descriptor, $0.baseAddress, $0.count) }
                     if count <= 0 { break } // EOF or error: the peer closed the socket
                     for body in decoder.push(Data(buffer[0 ..< count])) {
                         if let message = try? JSONRPCMessage.decodeMessages(from: body).first {
@@ -167,14 +167,14 @@ public final class TCPClientTransport<Framing: MessageFraming>: JSONRPCMessageTr
         isClosed = true
         stateLock.unlock()
 
-        shutdown(fd, Int32(SHUT_RDWR))
-        systemClose(fd)
+        shutdown(descriptor, Int32(SHUT_RDWR))
+        systemClose(descriptor)
     }
 }
 
 /// Calls the C library `close(2)` unambiguously — at file scope the transport's
 /// own `close()` method is not in scope, so this avoids the name clash.
-private func systemClose(_ fd: Int32) {
-    _ = close(fd)
+private func systemClose(_ descriptor: Int32) {
+    _ = close(descriptor)
 }
 #endif

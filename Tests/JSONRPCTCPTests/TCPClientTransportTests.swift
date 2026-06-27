@@ -68,11 +68,11 @@ private final class TCPEchoServer: @unchecked Sendable {
     private var thread: Thread?
 
     init() throws {
-        let fd = socket(AF_INET, sockStreamValue, 0)
-        guard fd >= 0 else { throw POSIXTestError("socket() failed (errno \(errno))") }
+        let listener = socket(AF_INET, sockStreamValue, 0)
+        guard listener >= 0 else { throw POSIXTestError("socket() failed (errno \(errno))") }
 
         var reuse: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
 
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
@@ -80,36 +80,36 @@ private final class TCPEchoServer: @unchecked Sendable {
         addr.sin_addr.s_addr = inet_addr("127.0.0.1")
 
         let bound = withUnsafePointer(to: &addr) { raw in
-            raw.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                bind(fd, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+            raw.withMemoryRebound(to: sockaddr.self, capacity: 1) { pointer in
+                bind(listener, pointer, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
         guard bound == 0 else {
-            close(fd)
+            close(listener)
             throw POSIXTestError("bind() failed (errno \(errno))")
         }
-        guard listen(fd, 1) == 0 else {
-            close(fd)
+        guard listen(listener, 1) == 0 else {
+            close(listener)
             throw POSIXTestError("listen() failed (errno \(errno))")
         }
 
         var assigned = sockaddr_in()
         var length = socklen_t(MemoryLayout<sockaddr_in>.size)
         _ = withUnsafeMutablePointer(to: &assigned) { raw in
-            raw.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                getsockname(fd, sa, &length)
+            raw.withMemoryRebound(to: sockaddr.self, capacity: 1) { pointer in
+                getsockname(listener, pointer, &length)
             }
         }
 
-        self.listenFD = fd
+        self.listenFD = listener
         self.port = UInt16(bigEndian: assigned.sin_port)
         start()
     }
 
     private func start() {
-        let fd = listenFD
+        let listener = listenFD
         let thread = Thread {
-            let client = accept(fd, nil, nil)
+            let client = accept(listener, nil, nil)
             guard client >= 0 else { return }
             var buffer = [UInt8](repeating: 0, count: 4096)
             while true {
@@ -137,7 +137,7 @@ private final class TCPEchoServer: @unchecked Sendable {
     }
 }
 
-private struct POSIXTestError: Error { let message: String; init(_ m: String) { message = m } }
+private struct POSIXTestError: Error { let message: String; init(_ message: String) { self.message = message } }
 
 #if canImport(Glibc)
 private let sockStreamValue = Int32(SOCK_STREAM.rawValue)
