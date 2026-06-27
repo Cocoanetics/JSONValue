@@ -3,15 +3,16 @@ import JSONFoundation
 import Testing
 @testable import JSONRPCPeer
 
-/// An in-memory ``JSONRPCMessageTransport`` — no framing, no subprocess, no bytes.
-/// That the peer drives it unchanged is the point: framing lives in the transport,
-/// so the peer is reusable across LSP (Content-Length), ACP (newline), and this.
-final class LoopbackTransport: JSONRPCMessageTransport, @unchecked Sendable {
+/// An injectable in-memory ``JSONRPCMessageTransport`` spy for white-box peer
+/// tests: `onSend` observes outbound messages (and can auto-respond), `inject`
+/// pushes inbound ones. Distinct from the shipping ``LoopbackTransport`` (a
+/// connected client/server *pair*) — here a single end is driven by hand.
+final class SpyTransport: JSONRPCMessageTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: AsyncThrowingStream<JSONRPCMessage, Error>.Continuation?
     private var _sent: [JSONRPCMessage] = []
     /// Invoked synchronously on each outbound message, so a test can auto-respond.
-    var onSend: (@Sendable (JSONRPCMessage, LoopbackTransport) -> Void)?
+    var onSend: (@Sendable (JSONRPCMessage, SpyTransport) -> Void)?
 
     func send(_ message: JSONRPCMessage) throws {
         lock.lock(); _sent.append(message); let callback = onSend; lock.unlock()
@@ -43,7 +44,7 @@ final class LoopbackTransport: JSONRPCMessageTransport, @unchecked Sendable {
 }
 
 @Test func correlatesRequestWithItsResponse() async throws {
-    let transport = LoopbackTransport()
+    let transport = SpyTransport()
     transport.onSend = { message, transport in
         if case .request(let request) = message {
             transport.inject(.response(id: request.id, result: .string("pong")))
@@ -58,7 +59,7 @@ final class LoopbackTransport: JSONRPCMessageTransport, @unchecked Sendable {
 }
 
 @Test func surfacesErrorResponsesAsThrows() async throws {
-    let transport = LoopbackTransport()
+    let transport = SpyTransport()
     transport.onSend = { message, transport in
         if case .request(let request) = message {
             transport.inject(.errorResponse(id: request.id, error: .methodNotFound(request.method)))
@@ -75,7 +76,7 @@ final class LoopbackTransport: JSONRPCMessageTransport, @unchecked Sendable {
 
 @Test(.timeLimit(.minutes(1)))
 func deliversInboundNotificationsToHandler() async throws {
-    let transport = LoopbackTransport()
+    let transport = SpyTransport()
     let delivered = OnceBox<String>()
     let peer = JSONRPCPeer(transport: transport)
     await peer.setHandlers(request: nil, notification: { method, _ in delivered.fire(method) })
@@ -94,7 +95,7 @@ func deliversInboundNotificationsToHandler() async throws {
 /// caller carries a `.timeLimit`, so a regression that never replies fails rather than
 /// hanging.
 private func injectAndAwaitReply(
-    _ transport: LoopbackTransport, _ request: JSONRPCMessage
+    _ transport: SpyTransport, _ request: JSONRPCMessage
 ) async -> JSONRPCMessage {
     let reply = OnceBox<JSONRPCMessage>()
     transport.onSend = { message, _ in if message.id == request.id { reply.fire(message) } }
@@ -138,7 +139,7 @@ private final class OnceBox<Value: Sendable>: @unchecked Sendable {
 
 @Test(.timeLimit(.minutes(1)))
 func dispatchesInboundRequestsAndRepliesWithHandlerResult() async throws {
-    let transport = LoopbackTransport()
+    let transport = SpyTransport()
     let peer = JSONRPCPeer(transport: transport)
     await peer.setHandlers(
         request: { method, _ in .success(.string("handled:\(method)")) },
@@ -153,7 +154,7 @@ func dispatchesInboundRequestsAndRepliesWithHandlerResult() async throws {
 
 @Test(.timeLimit(.minutes(1)))
 func acknowledgesInboundRequestsWithNullWhenNoHandler() async throws {
-    let transport = LoopbackTransport()
+    let transport = SpyTransport()
     let peer = JSONRPCPeer(transport: transport)
     await peer.setHandlers(request: nil, notification: nil)
     await peer.start()
@@ -195,7 +196,7 @@ private final class CapturingSink: JSONRPCMessageSink, @unchecked Sendable {
 }
 
 @Test func streamEndFailsPendingRequests() async throws {
-    let transport = LoopbackTransport()
+    let transport = SpyTransport()
     let peer = JSONRPCPeer(transport: transport)
     await peer.start()
 
@@ -210,7 +211,7 @@ private final class CapturingSink: JSONRPCMessageSink, @unchecked Sendable {
 @Test func sendRequestAfterStreamEndRejects() async throws {
     // After the inbound stream ends, a *new* request must reject rather than park a
     // continuation no reader will ever resolve.
-    let transport = LoopbackTransport()
+    let transport = SpyTransport()
     let peer = JSONRPCPeer(transport: transport)
     await peer.start()
     transport.finishInbound()

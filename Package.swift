@@ -9,10 +9,15 @@ import PackageDescription
 //   JSONRPCPeer        correlation + dispatch over an abstract transport  (pure)
 //   JSONRPCWire        framing codecs (Content-Length / line) · SSE decode (pure)
 //   JSONRPCStdio       Foundation.Process stdio transport                 (zero-dep)
+//   JSONRPCTCP         POSIX-socket TCP client transport                  (zero-dep)
 //   JSONRPCSSE         HTTP+SSE client transport (URLSession + SwiftCross) (light dep)
 //   JSONRPCSubprocess  swift-subprocess stdio transport                   (trait `Subprocess`)
 //
-// The model, peer, codecs, and Foundation.Process transport are dependency-free.
+// `JSONRPCPeer` also ships `LoopbackTransport` — an in-memory pair for running a
+// client and server peer in one process (embedding, or subprocess-free tests).
+//
+// The model, peer, codecs, and the Foundation.Process / TCP transports are
+// dependency-free.
 // `JSONRPCSSE` pulls SwiftCross (a zero-further-dependency cross-platform shim that
 // backfills `URLSession.bytes(for:)` off-Apple). swift-subprocess is quarantined
 // behind the off-by-default `Subprocess` trait, and sets the macOS 13 floor.
@@ -30,11 +35,16 @@ let package = Package(
         .library(name: "JSONRPCPeer", targets: ["JSONRPCPeer"]),
         .library(name: "JSONRPCWire", targets: ["JSONRPCWire"]),
         .library(name: "JSONRPCStdio", targets: ["JSONRPCStdio"]),
+        .library(name: "JSONRPCTCP", targets: ["JSONRPCTCP"]),
         .library(name: "JSONRPCSSE", targets: ["JSONRPCSSE"]),
         .library(name: "JSONRPCSubprocess", targets: ["JSONRPCSubprocess"]),
-        // Batteries-included bundle: peer + codecs + the stdio & SSE transports.
-        // Add `JSONRPCSubprocess` + the trait for the swift-subprocess transport.
-        .library(name: "JSONRPC", targets: ["JSONRPCPeer", "JSONRPCWire", "JSONRPCStdio", "JSONRPCSSE"])
+        // Batteries-included bundle: peer (incl. loopback) + codecs + the stdio,
+        // TCP & SSE transports. Add `JSONRPCSubprocess` + the trait for the
+        // swift-subprocess transport.
+        .library(
+            name: "JSONRPC",
+            targets: ["JSONRPCPeer", "JSONRPCWire", "JSONRPCStdio", "JSONRPCTCP", "JSONRPCSSE"]
+        )
     ],
     traits: [
         .default(enabledTraits: []),   // base graph: only SwiftCross (via JSONRPCSSE)
@@ -60,6 +70,10 @@ let package = Package(
             dependencies: ["JSONFoundation", "JSONRPCPeer", "JSONRPCWire"]
         ),
         .target(
+            name: "JSONRPCTCP",                         // POSIX sockets — zero-dep
+            dependencies: ["JSONFoundation", "JSONRPCPeer", "JSONRPCWire"]
+        ),
+        .target(
             name: "JSONRPCSSE",                         // URLSession + SwiftCross (cross-platform bytes)
             dependencies: [
                 "JSONFoundation", "JSONRPCPeer", "JSONRPCWire",
@@ -80,6 +94,7 @@ let package = Package(
         .testTarget(name: "JSONRPCPeerTests", dependencies: ["JSONRPCPeer", "JSONFoundation"]),
         .testTarget(name: "JSONRPCWireTests", dependencies: ["JSONRPCWire"]),
         .testTarget(name: "JSONRPCStdioTests", dependencies: ["JSONRPCStdio", "JSONRPCWire", "JSONFoundation"]),
+        .testTarget(name: "JSONRPCTCPTests", dependencies: ["JSONRPCTCP", "JSONRPCPeer", "JSONRPCWire", "JSONFoundation"]),
         .testTarget(name: "JSONRPCSubprocessTests", dependencies: ["JSONRPCSubprocess", "JSONRPCWire", "JSONFoundation"])
     ]
 )
