@@ -40,6 +40,11 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: "26.0"
+      # Xcode 26 ships SDKs/runtimes as downloadable components; the hosted runner
+      # image no longer bundles the iOS platform, so a `generic/platform=iOS` build
+      # fails with "iOS 26.0 is not installed" until we fetch it.
+      - name: Download iOS platform
+        run: xcodebuild -downloadPlatform iOS
       - name: Build (iOS)
         run: xcodebuild -scheme JSONFoundation -destination 'generic/platform=iOS' build
 
