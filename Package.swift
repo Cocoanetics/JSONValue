@@ -38,6 +38,9 @@ let package = Package(
         .library(name: "JSONRPCStdio", targets: ["JSONRPCStdio"]),
         .library(name: "JSONRPCTCP", targets: ["JSONRPCTCP"]),
         .library(name: "JSONRPCSSE", targets: ["JSONRPCSSE"]),
+        // The server-side counterpart of JSONRPCSSE: a transport-agnostic registry
+        // of Server-Sent Event streams (replay, resume, retention). Foundation-only.
+        .library(name: "JSONRPCSSEServer", targets: ["JSONRPCSSEServer"]),
         .library(name: "JSONRPCSubprocess", targets: ["JSONRPCSubprocess"]),
         // Batteries-included bundle: peer (incl. loopback) + codecs + the stdio,
         // TCP & SSE transports. Add `JSONRPCSubprocess` + the trait for the
@@ -76,6 +79,9 @@ let package = Package(
         .target(name: "JSONRPCPeer", dependencies: ["JSONFoundation"]),
         .target(name: "JSONRPCWire"),
 
+        // MARK: SSE server registry (pure Foundation; reuses JSONRPCWire's encoder)
+        .target(name: "JSONRPCSSEServer", dependencies: ["JSONRPCWire"]),
+
         // MARK: Transports (do I/O)
         .target(
             name: "JSONRPCStdio",                       // Foundation.Process — zero-dep
@@ -105,6 +111,7 @@ let package = Package(
         .testTarget(name: "JSONFoundationTests", dependencies: ["JSONFoundation"]),
         .testTarget(name: "JSONRPCPeerTests", dependencies: ["JSONRPCPeer", "JSONFoundation"]),
         .testTarget(name: "JSONRPCWireTests", dependencies: ["JSONRPCWire"]),
+        .testTarget(name: "JSONRPCSSEServerTests", dependencies: ["JSONRPCSSEServer", "JSONRPCWire"]),
         .testTarget(name: "JSONRPCStdioTests", dependencies: ["JSONRPCStdio", "JSONRPCWire", "JSONFoundation"]),
         .testTarget(name: "JSONRPCTCPTests", dependencies: ["JSONRPCTCP", "JSONRPCPeer", "JSONRPCWire", "JSONFoundation"]),
         .testTarget(name: "JSONRPCSubprocessTests", dependencies: ["JSONRPCSubprocess", "JSONRPCWire", "JSONFoundation"])
