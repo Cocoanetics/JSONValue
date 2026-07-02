@@ -13,7 +13,10 @@ env:
 jobs:
 
   build-macos:
-    runs-on: macos-latest
+    # Not macos-latest: that pool currently mixes macOS 15 and 26 images, and on
+    # macOS 15 test bundles built by Xcode 26's Swift fail to dlopen
+    # (@rpath/libswiftCompatibilitySpan.dylib); the macOS 26 runtime ships it.
+    runs-on: macos-26
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
@@ -38,7 +41,8 @@ jobs:
         run: swift test -v --skip-build --traits Subprocess
 
   build-ios:
-    runs-on: macos-latest
+    # macos-26 for the same runner-pool reason as build-macos.
+    runs-on: macos-26
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6

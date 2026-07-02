@@ -199,16 +199,14 @@ public typealias MCPJSONCoding = JSONCoding
         case let jsonValue as JSONValue:
             self = jsonValue
         case let bool as Bool:
-            #if canImport(Darwin)
-            // JSONSerialization vends numbers as NSNumber, and SE-0170 bridging
-            // lets NSNumber(0)/NSNumber(1) dynamic-cast to Bool — which would
-            // turn JSON 0/1 into booleans here (unlike Linux). Only a true
-            // CFBoolean is a boolean; every other NSNumber is a number.
-            if let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() {
+            // JSONSerialization vends numbers as NSNumber, and on every platform
+            // NSNumber(0)/NSNumber(1) dynamic-cast to Bool — which would turn
+            // JSON 0/1 into booleans here. Only a true boolean NSNumber may
+            // become `.bool`; every other NSNumber is a number.
+            if let number = value as? NSNumber, !Self.isBooleanNSNumber(number) {
                 self = JSONValue(bridging: number)
                 break
             }
-            #endif
             self = .bool(bool)
         case let int as Int:
             self = .integer(int)
@@ -235,16 +233,12 @@ public typealias MCPJSONCoding = JSONCoding
         case let double as Double:
             self = .double(double)
         case let number as NSNumber:
-            #if canImport(Darwin)
-            // On Apple platforms `Bool` bridges to `NSNumber` via `CFBoolean`;
-            // re-check via the CFTypeID since the `Bool` case only catches it
-            // sometimes. `CFBooleanGetTypeID` isn't exposed on Linux, so gate on
-            // Darwin (there the earlier `Bool` branch always wins for booleans).
-            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+            // Re-check: a boolean NSNumber usually matches the `Bool` case
+            // above, but not on every platform/bridging path.
+            if Self.isBooleanNSNumber(number) {
                 self = .bool(number.boolValue)
                 break
             }
-            #endif
             self = JSONValue(bridging: number)
         case let string as String:
             self = .string(string)
@@ -258,6 +252,18 @@ public typealias MCPJSONCoding = JSONCoding
         }
     }
     // swiftlint:enable cyclomatic_complexity function_body_length
+
+    /// Whether `number` is a true boolean. On Darwin that means a `CFBoolean`;
+    /// swift-corelibs-foundation backs every boolean `NSNumber` with the
+    /// `kCFBooleanTrue`/`kCFBooleanFalse` singletons (`Bool._bridgeToObjectiveC`),
+    /// so there identity distinguishes JSON `true`/`false` from the numeric 0/1.
+    private static func isBooleanNSNumber(_ number: NSNumber) -> Bool {
+        #if canImport(Darwin)
+        return CFGetTypeID(number) == CFBooleanGetTypeID()
+        #else
+        return number === NSNumber(value: true) || number === NSNumber(value: false)
+        #endif
+    }
 
     /// Classifies a non-boolean `NSNumber` as `.integer`, `.unsignedInteger`,
     /// or `.double`, preferring the narrowest case that is value-preserving.
