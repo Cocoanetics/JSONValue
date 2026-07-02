@@ -16,8 +16,8 @@ public indirect enum JSONSchema: Sendable {
         /// The properties of the type
         public var properties: [String: JSONSchema]
 
-        /// Which if the properties are mandatory
-        public var required: [String] = []
+        /// Which of the properties are mandatory
+        public var required: [String]
 
         /// Title of the type
         public var title: String?
@@ -25,8 +25,8 @@ public indirect enum JSONSchema: Sendable {
         /// Description of the type
         public var description: String?
 
-        /// Whether additional properties are allowed
-        public var additionalProperties: Bool? = false
+        /// Whether additional properties are allowed (`nil` omits the key from the schema)
+        public var additionalProperties: Bool?
 
         /// public initializer
         public init(
@@ -103,6 +103,7 @@ extension JSONSchema {
             // For object schemas, create a new object with empty required array
             return .object(Object(properties: object.properties.mapValues { $0.withoutRequired },
                                   required: [],
+                                  title: object.title,
                                   description: object.description,
                                   additionalProperties: object.additionalProperties),
                            defaultValue: defaultValue)
@@ -119,14 +120,18 @@ extension JSONSchema {
         // For other schema types, return as is since they don't have required fields
         case .string, .number, .boolean, .enum:
             return self
+
         case .oneOf(let schemas, let title, let description):
-            return .oneOf(schemas.map { $0.withoutRequired }, title: title, description: description)
+            return .oneOf(schemas.map(\.withoutRequired), title: title, description: description)
         }
     }
 }
 
 // Extension to apply default values when available
 extension JSONSchema {
+    /// Returns a copy with `defaultValue` filled in, unless the schema already carries one.
+    ///
+    /// `oneOf` schemas have no default-value slot and are returned unchanged.
     public func applyingDefault(_ defaultValue: JSONValue?) -> JSONSchema {
         guard let defaultValue else { return self }
         switch self {
@@ -179,7 +184,7 @@ extension JSONSchema {
 // Extension to add additionalProperties:false to all objects, for use with structured results
 // swiftlint:disable identifier_name
 extension JSONSchema {
-    /// Returns a new schema with all required fields removed
+    /// Returns a new schema with `additionalProperties: false` set on every object, recursively
     public var addingAdditionalPropertiesRestrictionToObjects: JSONSchema {
         switch self {
         case .object(let object, let defaultValue):
@@ -190,6 +195,7 @@ extension JSONSchema {
                 Object(
                     properties: updatedProperties,
                     required: object.required,
+                    title: object.title,
                     description: object.description,
                     additionalProperties: false
                 ),
@@ -208,10 +214,11 @@ extension JSONSchema {
         // For other schema types, return as is since they don't have required fields
         case .oneOf(let schemas, let title, let description):
             return .oneOf(
-                schemas.map { $0.addingAdditionalPropertiesRestrictionToObjects },
+                schemas.map(\.addingAdditionalPropertiesRestrictionToObjects),
                 title: title,
                 description: description
             )
+
         default:
             return self
         }

@@ -1,13 +1,11 @@
-# swiftformat configuration for SwiftACP. Run locally before committing.
-# 
+# swiftformat configuration for JSONFoundation. Run locally before committing:
 #
 #   swiftformat .
 #
-# The sources are hand-written to mirror acpx 0.11.0 closely, so SwiftFormat's
-# opinionated wrapping / hoisting / self / doc-comment rules are disabled to
-# preserve that structure. What stays enabled is the safe, mechanical layer:
-# import order, operator spacing, redundant-whitespace and blank-line cleanup —
-# the same things `.editorconfig` describes for other editors.
+# SwiftFormat's opinionated wrapping / hoisting / self / doc-comment rules are
+# disabled to preserve the hand-written structure. What stays enabled is the
+# safe, mechanical layer: import order, operator spacing, redundant-whitespace
+# and blank-line cleanup.
 
 --swiftversion 6.0
 --indent 4
@@ -26,4 +24,4 @@
 #     explicit Sendable, regular vs. doc comments) and are left as-is.
 --disable trailingCommas,wrapMultilineStatementBraces,redundantReturn,wrapArguments,wrapFunctionBodies,wrapPropertyBodies,wrapLoopBodies,indent,hoistPatternLet,hoistTry,docComments,conditionalAssignment,redundantSelf,redundantSendable,blankLinesBetweenScopes,extensionAccessControl,opaqueGenericParameters,unusedArguments,andOperator
 
---exclude .build,.swiftpm,Tests/SwiftACPTests/Fixtures
+--exclude .build,.swiftpm

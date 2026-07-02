@@ -3,13 +3,13 @@
 #if Subprocess
 import Foundation
 import JSONFoundation
-import Testing
 import JSONRPCSubprocess
 import JSONRPCWire
+import Testing
 
 @Test(.timeLimit(.minutes(1)))
 func stdioMessageTransportLoopbackThroughCat() async throws {
-    let transport = StdioMessageTransport(
+    let transport = StdioTransport(
         endpoint: .childProcess(ProcessLaunch(executable: "cat", arguments: ["-u"])),
         framing: LineFraming())
     var inbound = transport.makeInboundStream().makeAsyncIterator()
@@ -29,7 +29,7 @@ func stdioMessageTransportLoopbackThroughCat() async throws {
 @Test(.timeLimit(.minutes(1)))
 func childProcessReceivesCustomEnvironment() async throws {
     let script = #"printf '{"jsonrpc":"2.0","method":"%s","params":null}\n' "$ACP_TEST_VAR""#
-    let transport = StdioMessageTransport(
+    let transport = StdioTransport(
         endpoint: .childProcess(ProcessLaunch(
             executable: "/bin/sh", arguments: ["-c", script],
             environment: ["ACP_TEST_VAR": "hello-env"])),

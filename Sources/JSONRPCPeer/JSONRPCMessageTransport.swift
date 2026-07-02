@@ -5,13 +5,13 @@ import JSONFoundation
 /// sink owns serialization and framing; a peer hands it whole messages.
 ///
 /// Split out from ``JSONRPCMessageTransport`` so a peer can be used in **push**
-/// mode — where some *other* component already owns the read loop (e.g. SwiftMCP's
-/// `MCPTransport`, which reads its wire and drives dispatch itself) and only needs
+/// mode — where some *other* component already owns the read loop and only needs
 /// the peer for outbound request/response correlation. Such a consumer constructs
 /// `JSONRPCPeer(sink:)` and feeds inbound replies via ``JSONRPCPeer/ingest(_:)``.
 public protocol JSONRPCMessageSink: Sendable {
     /// Serialize and write one message. Ordering of successive sends must be
-    /// preserved (a locked write satisfies this).
+    /// preserved (a locked write satisfies this). Implementations throw
+    /// ``JSONRPCPeerError/closed`` for a send after the transport was closed.
     func send(_ message: JSONRPCMessage) throws
 }
 
@@ -21,19 +21,22 @@ public protocol JSONRPCMessageSink: Sendable {
 /// This is the seam that makes ``JSONRPCPeer`` framing-agnostic: the peer owns only
 /// JSON-RPC *semantics*; the transport owns the entire wire — framing *and* JSON
 /// (de)serialization. Concrete transports are tiny:
-/// - **LSP** frames as `Content-Length: <n>\r\n\r\n<json>` (`LSPFramedTransport`).
-/// - **ACP / MCP-over-stdio** frame as one newline-terminated JSON line.
-/// - A **loopback** transport (tests) does no framing and hands messages straight across.
+/// - **LSP** frames as `Content-Length: <n>\r\n\r\n<json>` (`ContentLengthFraming`).
+/// - **ACP / MCP-over-stdio** frame as one newline-terminated JSON line (`LineFraming`).
+/// - ``LoopbackTransport`` does no framing and hands messages straight across.
 public protocol JSONRPCMessageTransport: JSONRPCMessageSink {
     /// The stream of inbound messages, already de-framed and decoded. Call once.
+    /// The stream finishes when the wire reaches EOF or the transport is closed.
     func makeInboundStream() -> AsyncThrowingStream<JSONRPCMessage, Error>
-    /// Stop the transport and release resources.
+    /// Stop the transport and release resources. Idempotent; a later ``send(_:)``
+    /// throws ``JSONRPCPeerError/closed``.
     func close()
 }
 
-/// Errors originating in the peer itself (as opposed to a transport's own errors).
+/// Errors shared by the peer and its transports.
 public enum JSONRPCPeerError: Error, LocalizedError {
-    /// The peer (or its transport) was closed; in-flight requests fail with this.
+    /// The peer or transport was closed. In-flight requests fail with this, and
+    /// transports throw it from `send(_:)` after `close()`.
     case closed
 
     public var errorDescription: String? {

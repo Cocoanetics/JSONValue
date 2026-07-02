@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 import JSONRPCWire
+import Testing
 
 private func text(_ data: Data) -> String { String(data: data, encoding: .utf8) ?? "" }
 

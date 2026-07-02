@@ -1,0 +1,14 @@
+version: 1
+builder:
+  configs:
+    - documentation_targets:
+        - JSONFoundation
+        - JSONRPCPeer
+        - JSONRPCWire
+        - JSONRPCStdio
+        - JSONRPCTCP
+        - JSONRPCSSE
+        - JSONRPCSSEServer
+        # JSONRPCSubprocess is omitted: its whole body is behind the
+        # `Subprocess` trait and SPI builds with default traits, so its docs
+        # page would be an empty module.

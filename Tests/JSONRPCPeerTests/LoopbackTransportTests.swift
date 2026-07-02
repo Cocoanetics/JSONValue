@@ -1,7 +1,7 @@
 import Foundation
-import Testing
 import JSONFoundation
 @testable import JSONRPCPeer
+import Testing
 
 @Suite("LoopbackTransport")
 struct LoopbackTransportTests {
@@ -47,8 +47,8 @@ struct LoopbackTransportTests {
         try await client.sendNotification(method: "a", params: nil)
         try await client.sendNotification(method: "b", params: nil)
 
-        // Give the inbound stream a moment to deliver both notifications.
-        try await Task.sleep(nanoseconds: 100_000_000)
+        // Deterministic wait: resumes once both notifications have been recorded.
+        await received.waitForCount(2)
         #expect(await received.methods == ["a", "b"])
 
         await client.close()
@@ -67,8 +67,29 @@ struct LoopbackTransportTests {
         #expect(next == nil) // stream finished, no element
     }
 
+    /// Records notification methods in arrival order and lets a test await a
+    /// target count — deterministically, with no sleep or poll. Supports a
+    /// single waiter, which is all these tests need.
     private actor NotificationCollector {
         private(set) var methods: [String] = []
-        func record(_ method: String) { methods.append(method) }
+        private var waiter: (target: Int, continuation: CheckedContinuation<Void, Never>)?
+
+        func record(_ method: String) {
+            methods.append(method)
+            if let waiter, methods.count >= waiter.target {
+                self.waiter = nil
+                waiter.continuation.resume()
+            }
+        }
+
+        /// Suspends until at least `target` notifications have been recorded.
+        /// Each caller carries a `.timeLimit`, so a never-delivered notification
+        /// fails the test rather than hanging it.
+        func waitForCount(_ target: Int) async {
+            guard methods.count < target else { return }
+            await withCheckedContinuation { continuation in
+                waiter = (target, continuation)
+            }
+        }
     }
 }

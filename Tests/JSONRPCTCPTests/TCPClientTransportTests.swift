@@ -3,11 +3,11 @@
 // on macOS and Linux, matching the stdio transport's test gating.
 #if os(macOS) || os(Linux)
 import Foundation
-import Testing
 import JSONFoundation
 import JSONRPCPeer
-import JSONRPCWire
 @testable import JSONRPCTCP
+import JSONRPCWire
+import Testing
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)

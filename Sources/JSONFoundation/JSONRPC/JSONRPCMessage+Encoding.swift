@@ -2,12 +2,48 @@
 //  JSONRPCMessage+Encoding.swift
 //  JSONFoundation
 //
-//  Transport-independent encoding — the symmetric inverse of
-//  `decodeMessages(from:)`. Newline framing and any `ByteBuffer` overloads stay
-//  in the consuming transport.
+//  The wire encoder: the custom `Encodable` implementation plus
+//  transport-independent `Data`/`String` helpers — the symmetric inverse of
+//  `JSONRPCMessage+Decoding.swift`. Newline framing and any `ByteBuffer`
+//  overloads stay in the consuming transport.
 //
 
 import Foundation
+
+// MARK: - Encodable Implementation
+
+extension JSONRPCMessage {
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        switch self {
+        case .request(let data):
+            try container.encode(data.jsonrpc, forKey: .jsonrpc)
+            try container.encode(data.id, forKey: .id)
+            try container.encode(data.method, forKey: .method)
+            try container.encodeIfPresent(data.params, forKey: .params)
+
+        case .notification(let data):
+            try container.encode(data.jsonrpc, forKey: .jsonrpc)
+            try container.encode(data.method, forKey: .method)
+            try container.encodeIfPresent(data.params, forKey: .params)
+
+        case .response(let data):
+            try container.encode(data.jsonrpc, forKey: .jsonrpc)
+            try container.encode(data.id, forKey: .id)
+            // `result` is required on success per the spec; a nil result is
+            // normalized to JSON null so the message stays valid and round-trips.
+            try container.encode(data.result ?? .null, forKey: .result)
+
+        case .errorResponse(let data):
+            try container.encode(data.jsonrpc, forKey: .jsonrpc)
+            try container.encodeIfPresent(data.id, forKey: .id)
+            try container.encode(data.error, forKey: .error)
+        }
+    }
+}
+
+// MARK: - Data Helpers
 
 public extension JSONRPCMessage {
     /// A `JSONEncoder` configured to round-trip with ``decodeMessages(from:)``:

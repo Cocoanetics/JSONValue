@@ -1,7 +1,7 @@
 import Foundation
 
-/// Matches an asynchronous caller to the reply of the request it sent, keyed by a
-/// string id — the channel-agnostic half of "act as a JSON-RPC caller."
+/// Matches an asynchronous caller to the reply of the request it sent, keyed by
+/// any `Hashable` id — the channel-agnostic half of "act as a JSON-RPC caller."
 ///
 /// Unlike ``JSONRPCPeer``, the correlator owns **no** transport and performs **no**
 /// send: the caller writes the request itself (over whatever channel, on whatever

@@ -22,16 +22,18 @@ public enum StdioEndpoint: Sendable {
 /// A single stdio ``JSONRPCMessageTransport`` parameterized over the two axes that
 /// actually vary between LSP, ACP, and MCP: the **endpoint** (spawn a child vs. be
 /// the process) and the **framing** (`Content-Length` vs. newline). The JSON codec
-/// and the sync-`send`-over-`AsyncStream` machinery are fixed.
+/// and the sync-`send`-over-`AsyncStream` machinery are fixed. Ships in the
+/// `JSONRPCSubprocess` module/product, gated behind the `Subprocess` package trait;
+/// the trait-free stdio alternative is `ProcessTransport` in `JSONRPCStdio`.
 ///
-/// This is the unification target: `StdioMessageTransport(.childProcess(launch),
+/// This is the unification target: `StdioTransport(.childProcess(launch),
 /// ContentLengthFraming())` is LSP; `(.childProcess(launch), LineFraming())` is an
 /// ACP/MCP client; `(.currentProcess, LineFraming())` is an ACP agent / MCP server.
 ///
 /// The `.childProcess` path runs on `swift-subprocess` and is lock-free (`Sendable`,
 /// no `@unchecked`); `.currentProcess` reads its own stdin on a thread (inherent —
 /// you can't avoid a blocking read of your own fd 0).
-public final class StdioMessageTransport<Framing: MessageFraming>: JSONRPCMessageTransport, Sendable {
+public final class StdioTransport<Framing: MessageFraming>: JSONRPCMessageTransport, Sendable {
     private let outbound: AsyncStream<JSONRPCMessage>.Continuation
     private let inbound: AsyncThrowingStream<JSONRPCMessage, any Error>
     private let runTask: Task<Void, Never>
@@ -141,7 +143,7 @@ public final class StdioMessageTransport<Framing: MessageFraming>: JSONRPCMessag
                 for try await buffer in execution.standardOutput {
                     let bytes = buffer.withUnsafeBytes { Array($0) }
                     for body in decoder.push(Data(bytes)) {
-                        if let message = try? JSONRPCMessage.decodeMessages(from: body).first {
+                        for message in (try? JSONRPCMessage.decodeMessages(from: body)) ?? [] {
                             inbound.yield(message)
                         }
                     }
@@ -176,23 +178,17 @@ public final class StdioMessageTransport<Framing: MessageFraming>: JSONRPCMessag
         inbound: AsyncThrowingStream<JSONRPCMessage, any Error>.Continuation
     ) -> Task<Void, Never> {
         // Reader: our own stdin is a blocking fd, so it needs a thread.
-        let reader = Thread {
-            var decoder = framing
-            let handle = FileHandle.standardInput
-            while true {
-                let chunk = handle.availableData
-                if chunk.isEmpty { break } // EOF: the host closed our stdin
-                for body in decoder.push(chunk) {
-                    if let message = try? JSONRPCMessage.decodeMessages(from: body).first {
-                        inbound.yield(message)
-                    }
+        let handle = FileHandle.standardInput
+        startFramedReaderThread(
+            name: "jsonrpc.stdio.reader",
+            framing: framing,
+            readChunk: { handle.availableData }, // empty on EOF: the host closed our stdin
+            onBody: { body in
+                for message in (try? JSONRPCMessage.decodeMessages(from: body)) ?? [] {
+                    inbound.yield(message)
                 }
-            }
-            inbound.finish()
-        }
-        reader.name = "jsonrpc.stdio.reader"
-        reader.stackSize = 4 << 20
-        reader.start()
+            },
+            onEOF: { inbound.finish() })
 
         // Writer: a single task drains outbound to our stdout (no lock needed).
         return Task {
@@ -204,5 +200,11 @@ public final class StdioMessageTransport<Framing: MessageFraming>: JSONRPCMessag
         }
     }
 }
+
+/// The transport's original name, shipped in 2.1.0–2.4.0. The `Message` infix was
+/// the odd one out among the transports (`ProcessTransport`, `TCPClientTransport`,
+/// `SSEClientTransport`, `LoopbackTransport`), so it was dropped.
+@available(*, deprecated, renamed: "StdioTransport")
+public typealias StdioMessageTransport<Framing: MessageFraming> = StdioTransport<Framing>
 
 #endif

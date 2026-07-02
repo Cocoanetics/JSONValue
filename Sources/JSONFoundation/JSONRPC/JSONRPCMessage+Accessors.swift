@@ -9,7 +9,6 @@
 import Foundation
 
 public extension JSONRPCMessage {
-
     // MARK: - Shape
 
     /// `true` for a `request` — a method call carrying an `id`, expecting a reply.
@@ -45,6 +44,28 @@ public extension JSONRPCMessage {
     }
 
     // MARK: - Common fields
+
+    /// The JSON-RPC protocol version, typically "2.0" — present on every case.
+    var jsonrpc: String {
+        switch self {
+        case .request(let data): return data.jsonrpc
+        case .response(let data): return data.jsonrpc
+        case .errorResponse(let data): return data.jsonrpc
+        case .notification(let data): return data.jsonrpc
+        }
+    }
+
+    /// The unique identifier used to correlate requests and replies — `nil` for
+    /// a `notification` (and for an `errorResponse` whose request id could not
+    /// be determined).
+    var id: JSONRPCID? {
+        switch self {
+        case .request(let data): return data.id
+        case .response(let data): return data.id
+        case .errorResponse(let data): return data.id
+        case .notification: return nil
+        }
+    }
 
     /// The invoked method name — for a `request` or `notification`; `nil` for a
     /// reply.

@@ -29,6 +29,15 @@
 /// from documentation comments, and maps the property types to a ``JSONSchema``
 /// via ``SchemaMetadata``. Apply it only to `struct` declarations; nested
 /// structs used as property types must also be `@Schema`.
+///
+/// Generated behavior worth knowing:
+/// - `static` and computed properties are excluded; only stored instance
+///   properties appear in the schema.
+/// - A property with a default value or an optional type is not `required`.
+/// - A nested `CodingKeys` enum (`String, CodingKey`, any access level) renames
+///   schema properties the same way it renames wire keys.
+/// - `MCPClientReturn` resolves to `[Element]` for single-array wrapper structs
+///   and to `Self` otherwise (consumed by SwiftMCP's client-proxy generator).
 @attached(member, names: named(schemaMetadata), named(MCPClientReturn))
 @attached(extension, conformances: SchemaRepresentable)
 public macro Schema() = #externalMacro(module: "JSONFoundationMacros", type: "SchemaMacro")

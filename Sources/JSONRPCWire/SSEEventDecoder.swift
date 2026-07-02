@@ -11,7 +11,7 @@ import Foundation
 /// event, and multiple `data:` lines join with `\n`. Only `data` is surfaced;
 /// `event` / `id` / `retry` are accepted and ignored (resumability is a separate
 /// concern that lives in the transport).
-public struct SSEEventDecoder {
+public struct SSEEventDecoder: Sendable {
     private var buffer = Data()
     private var dataLines: [String] = []
 

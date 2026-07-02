@@ -1,5 +1,5 @@
 //
-//  MCPToolMetadata.swift
+//  SchemaMetadata.swift
 //  JSONFoundation
 //
 //  Created by Oliver Drobnik on 30.03.25.
@@ -12,19 +12,19 @@ public struct SchemaMetadata: Sendable {
     /// The name of the type
     public let name: String
 
-    /// The parameters of the function
+    /// The properties making up the type's schema
     public let parameters: [SchemaPropertyInfo]
 
-    /// A description of the function's purpose
+    /// A description of the type's purpose
     public let description: String?
 
-/**
-     Creates a new MCPToolMetadata instance.
-     
+    /**
+     Creates a new SchemaMetadata instance.
+
      - Parameters:
-       - name: The name of the function
-       - description: A description of the function's purpose
-       - parameters: The parameters of the function
+       - name: The name of the type
+       - description: A description of the type's purpose
+       - parameters: The properties making up the type's schema
      */
     public init(name: String, description: String? = nil, parameters: [SchemaPropertyInfo]) {
         self.name = name
@@ -48,9 +48,9 @@ public struct SchemaMetadata: Sendable {
         }
 
         return .object(JSONSchema.Object(
-			properties: properties,
-			required: required,
-			description: description
-		))
+            properties: properties,
+            required: required,
+            description: description
+        ))
     }
 }

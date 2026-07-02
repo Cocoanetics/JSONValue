@@ -13,7 +13,10 @@ env:
 jobs:
 
   build-macos:
-    runs-on: macos-latest
+    # Not macos-latest: that pool currently mixes macOS 15 and 26 images, and on
+    # macOS 15 test bundles built by Xcode 26's Swift fail to dlopen
+    # (@rpath/libswiftCompatibilitySpan.dylib); the macOS 26 runtime ships it.
+    runs-on: macos-26
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
@@ -30,9 +33,16 @@ jobs:
         run: swift build --build-tests -v
       - name: Test (macOS)
         run: swift test -v --skip-build
+      # The default trait set compiles JSONRPCSubprocess (and its tests) to an
+      # empty module, so a separate leg builds and tests with the trait enabled.
+      - name: Build (macOS, Subprocess trait)
+        run: swift build --build-tests -v --traits Subprocess
+      - name: Test (macOS, Subprocess trait)
+        run: swift test -v --skip-build --traits Subprocess
 
   build-ios:
-    runs-on: macos-latest
+    # macos-26 for the same runner-pool reason as build-macos.
+    runs-on: macos-26
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
@@ -66,7 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Setup Swift
-        uses: SwiftyLab/setup-swift@latest
+        uses: SwiftyLab/setup-swift@v1
         with:
           swift-version: "6.3.1"
       - name: Verify Swift version
@@ -79,6 +89,10 @@ jobs:
   build-android:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Cross-compiling the macro test target trips swiftlang/swift-package-manager#8094
+    # (missing index-store unit); this drops that host-only target from the graph.
+    env:
+      JSONFOUNDATION_SKIP_MACRO_TESTS: "1"
     steps:
       - uses: actions/checkout@v6
       - name: Build & test (Android emulator)

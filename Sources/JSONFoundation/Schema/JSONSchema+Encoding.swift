@@ -1,6 +1,7 @@
 import Foundation
 
 // MARK: - JSONSchema encoding
+
 extension JSONSchema {
     fileprivate typealias CodingKeys = JSONSchemaCodingKeys
 
@@ -147,7 +148,7 @@ extension JSONSchema {
         if !object.properties.isEmpty {
             var propertiesContainer = container.nestedContainer(keyedBy: AnyCodingKey.self, forKey: .properties)
             for (key, value) in object.properties {
-                try propertiesContainer.encode(value, forKey: AnyCodingKey(stringValue: key)!)
+                try propertiesContainer.encode(value, forKey: AnyCodingKey(key))
             }
         }
 

@@ -17,7 +17,6 @@ import Foundation
 public typealias JSONRPCError = JSONRPCMessage.JSONRPCErrorResponseData.ErrorPayload
 
 public extension JSONRPCError {
-
     // MARK: - Reserved spec codes
 
     /// `-32700` — invalid JSON was received.

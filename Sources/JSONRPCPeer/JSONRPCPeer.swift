@@ -6,35 +6,33 @@ import JSONFoundation
 /// (concurrently, so a slow handler can't stall the read loop), and delivers
 /// notifications in arrival order.
 ///
-/// ## Why this exists
-///
-/// This is the generic correlator+dispatcher that SwiftMCP, SwiftACP, and this LSP
-/// POC each hand-rolled separately. Pulled out here over ``JSONRPCMessageTransport``
-/// — which trades in whole ``JSONRPCMessage`` values, leaving framing and JSON
-/// coding entirely to the transport — it is reusable verbatim across all three.
-/// LSP and ACP differ *only* in framing (`Content-Length` vs newline), which lives
-/// in the transport, so the peer itself never changes.
-///
-/// Candidate for extraction into a shared package on top of JSONFoundation (which
-/// already owns the `JSONRPCMessage` wire model); this target is the prototype.
+/// The peer owns only JSON-RPC *semantics*. It trades in whole ``JSONRPCMessage``
+/// values over ``JSONRPCMessageTransport``, leaving framing and JSON coding
+/// entirely to the transport — protocols like LSP and ACP differ only in framing
+/// (`Content-Length` vs newline), so the same peer serves both unchanged.
 ///
 /// ## Pull vs push
 ///
-/// The peer supports both ownership models, which is what lets all three sibling
-/// projects adopt it:
+/// The peer supports both ownership models:
 /// - **Pull** — `init(transport:)` + ``start()``: the peer owns the read loop and
-///   reads inbound messages off the transport. This is how LSP and ACP (which each
-///   own a subprocess pipe) use it.
+///   reads inbound messages off the transport (e.g. a client that owns a
+///   subprocess pipe or socket).
 /// - **Push** — `init(sink:)` + ``ingest(_:)``: some other component already owns
-///   the read loop and feeds inbound messages in. This is how SwiftMCP would use
-///   it — its `MCPTransport` reads the wire and drives dispatch, so the peer is
-///   needed only for outbound request/response correlation (the `MCPServerProxy`
-///   client and the server's `sampling`/`elicitation` requests).
+///   the read loop and feeds inbound messages in; the peer provides outbound
+///   request/response correlation only.
 public actor JSONRPCPeer {
     /// Handles an inbound (peer-originated) request; returns the result or an error.
     public typealias RequestHandler =
         @Sendable (_ method: String, _ params: JSONValue?) async -> Result<JSONValue, JSONRPCError>
     /// Handles an inbound notification (no reply).
+    ///
+    /// Notification handlers are awaited inline on the inbound path to preserve
+    /// arrival order, so all further message processing — including response
+    /// correlation for this peer's own pending ``sendRequest(method:params:)``
+    /// calls — is suspended until the handler returns. Offload long-running work
+    /// to a `Task` inside the handler, and never await `sendRequest` on the same
+    /// peer from within a notification handler (in pull mode that deadlocks the
+    /// read loop).
     public typealias NotificationHandler =
         @Sendable (_ method: String, _ params: JSONValue?) async -> Void
 
@@ -81,7 +79,7 @@ public actor JSONRPCPeer {
     }
 
     /// Begin reading inbound messages (pull mode). Call once, after handlers are
-    /// set. A no-op in push mode — there feed messages via ``ingest(_:)`` instead.
+    /// set. In push mode this is a no-op — feed messages via ``ingest(_:)`` instead.
     public func start() {
         guard readTask == nil, let ownedTransport else { return }
         let stream = ownedTransport.makeInboundStream()
@@ -98,31 +96,65 @@ public actor JSONRPCPeer {
     }
 
     /// Suspends until the inbound stream ends (peer disconnected / EOF) or
-    /// ``close()`` is called.
+    /// ``close()`` is called. In push mode there is no read loop and this
+    /// returns immediately.
     public func waitUntilClosed() async {
         await readTask?.value
+    }
+
+    /// Stop the peer: cancel the read loop, close an owned transport (a push-mode
+    /// sink stays open — the caller owns the wire), and fail all in-flight
+    /// requests with ``JSONRPCPeerError/closed``. Safe to call more than once.
+    public func close() {
+        guard !isClosed else { return }
+        isClosed = true
+        readTask?.cancel()
+        // Only close a transport we own; in push mode the caller owns the wire.
+        ownedTransport?.close()
+        failAllPending(with: JSONRPCPeerError.closed)
     }
 
     // MARK: Sending
 
     /// Send a request and await its result as raw JSON.
+    ///
+    /// Honors task cancellation: if the awaiting task is cancelled, this throws
+    /// `CancellationError` and releases the pending entry. JSON-RPC has no
+    /// standard cancel, so the remote side may still execute the request —
+    /// protocol-level cancellation (e.g. LSP's `$/cancelRequest`) remains the
+    /// caller's job.
     public func sendRequest(method: String, params: JSONValue?) async throws -> JSONValue {
         let id = allocateID()
         let message = JSONRPCMessage.request(id: id, method: method, params: params)
-        return try await withCheckedThrowingContinuation { continuation in
-            if isClosed {
-                continuation.resume(throwing: JSONRPCPeerError.closed)
-                return
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                if isClosed {
+                    continuation.resume(throwing: JSONRPCPeerError.closed)
+                    return
+                }
+                // A task cancelled before registration has already run onCancel,
+                // where cancelPending found nothing — resolve it here instead.
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                pending[id] = continuation
+                do {
+                    wireLog?(.outbound, message)
+                    try sink.send(message)
+                } catch {
+                    pending[id] = nil
+                    continuation.resume(throwing: error)
+                }
             }
-            pending[id] = continuation
-            do {
-                wireLog?(.outbound, message)
-                try sink.send(message)
-            } catch {
-                pending[id] = nil
-                continuation.resume(throwing: error)
-            }
+        } onCancel: {
+            Task { await self.cancelPending(id) }
         }
+    }
+
+    private func cancelPending(_ id: Int) {
+        guard let continuation = pending.removeValue(forKey: id) else { return }
+        continuation.resume(throwing: CancellationError())
     }
 
     /// Send a notification (no reply expected).
@@ -191,6 +223,8 @@ public actor JSONRPCPeer {
             message = .errorResponse(id: id, error: error)
         }
         wireLog?(.outbound, message)
+        // A failed reply means the peer is gone; there is no one to report it to,
+        // and the read loop's EOF handling tears the connection down.
         try? sink.send(message)
     }
 
@@ -210,14 +244,5 @@ public actor JSONRPCPeer {
         for (_, continuation) in waiters {
             continuation.resume(throwing: error)
         }
-    }
-
-    public func close() {
-        guard !isClosed else { return }
-        isClosed = true
-        readTask?.cancel()
-        // Only close a transport we own; in push mode the caller owns the wire.
-        ownedTransport?.close()
-        failAllPending(with: JSONRPCPeerError.closed)
     }
 }

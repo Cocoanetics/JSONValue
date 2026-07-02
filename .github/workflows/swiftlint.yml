@@ -10,8 +10,11 @@ on:
 
 jobs:
   lint:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
+    # Pinned official image so `--strict` results are reproducible — a brew
+    # install floats to the newest SwiftLint, whose new/tightened default rules
+    # can fail CI on an untouched codebase.
+    container: ghcr.io/realm/swiftlint:0.57.1
     steps:
-      - uses: actions/checkout@v4
-      - run: brew install swiftlint
+      - uses: actions/checkout@v6
       - run: swiftlint lint --strict

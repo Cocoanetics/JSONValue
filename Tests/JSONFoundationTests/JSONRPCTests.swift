@@ -48,7 +48,7 @@ struct JSONRPCMessageTests {
             let encoded = try message.encoded()
             let decoded = try JSONRPCMessage.decodeMessages(from: encoded)
             #expect(decoded.count == 1)
-            #expect(decoded.first == message)   // Equatable via synthesized Hashable
+            #expect(decoded.first == message) // Equatable via synthesized Hashable
         }
     }
 
@@ -123,7 +123,7 @@ struct JSONRPCEncodingTests {
         #expect(try JSONRPCMessage.decodeMessages(from: batch).count == 2)
 
         let single = try JSONRPCMessage.encodeBatch([.request(id: 1, method: "ping")])
-        #expect(JSONRPCMessage.isBatchPayload(single) == true)   // still an array
+        #expect(JSONRPCMessage.isBatchPayload(single) == true) // still an array
         #expect(try JSONRPCMessage.decodeMessages(from: single).count == 1)
     }
 
@@ -131,7 +131,7 @@ struct JSONRPCEncodingTests {
         let message = JSONRPCMessage.request(
             id: 1, method: "open", params: ["uri": .string("https://a/b")]
         )
-        #expect(try message.encodedString().contains("https://a/b"))   // not escaped to a\/b
+        #expect(try message.encodedString().contains("https://a/b")) // not escaped to a\/b
     }
 }
 

@@ -7,41 +7,20 @@
 
 import Foundation
 
-/**
- An extension on Array that provides functionality for extracting case labels from CaseIterable types.
+extension CaseIterable {
+    /**
+     The labels of all cases of this type, in `allCases` order.
 
- This extension allows creating an array of strings from the case labels of any type that conforms to
- CaseIterable. The case labels are extracted using the type's string representation, with special handling
- for cases with associated values.
+     The labels are extracted using each case's string representation, with special handling
+     for cases with associated values: the case name is kept and the associated values are
+     trimmed. For example, for a case like `case example(value: Int)`, the label is `"example"`.
 
- If the enum conforms to CustomStringConvertible, the case labels will be determined by the custom
- description implementation. This allows for customization of how enum cases are represented in MCP tools.
- */
-extension Array where Element == String {
-/**
-	 Initialize an array of case labels if the given parameter (a type) conforms to CaseIterable.
-
-	 - Parameters:
-	   - type: The type to extract case labels from. Must conform to CaseIterable.
-
-	 - Returns: An array of strings containing the case labels, or nil if the type doesn't conform to
-	   CaseIterable.
-
-	 - Note: For cases with associated values, this initializer will extract the case name without the
-	 associated values. For example, for a case like `case example(value: Int)`, it will return `"example"`.
-
-	 - Note: If the enum conforms to CustomStringConvertible, the case labels will be determined by the
-	 custom description implementation. This allows for customization of how enum cases are represented in
-	 MCP tools.
-	 */
-    public init?<T>(caseLabelsFrom type: T.Type) {
-        // Check if T conforms to CaseIterable at runtime.
-        guard let caseIterableType = type as? any CaseIterable.Type else {
-            return nil
-        }
-
-        let cases = caseIterableType.allCases
-        self = cases.map { caseValue in
+     - Note: If the enum conforms to CustomStringConvertible, the case labels are determined
+     by the custom description implementation. This allows for customization of how enum cases
+     are represented in generated schemas.
+     */
+    public static var caseLabels: [String] {
+        return self.allCases.map { caseValue in
             let description = String(describing: caseValue)
 
             // trim off associated value if any
@@ -54,17 +33,25 @@ extension Array where Element == String {
     }
 }
 
-extension CaseIterable {
-    public static var caseLabels: [String] {
-        return self.allCases.map { caseValue in
-            let description = String(describing: caseValue)
+extension [String] {
+    /**
+     Initialize an array of case labels if the given parameter (a type) conforms to CaseIterable.
 
-            // trim off associated value if any
-            if let parenIndex = description.firstIndex(of: "(") {
-                return String(description[..<parenIndex])
-            }
+     - Parameters:
+       - type: The type to extract case labels from. Must conform to CaseIterable.
 
-            return description
+     - Returns: An array of strings containing the case labels, or nil if the type doesn't
+       conform to CaseIterable.
+
+     See `CaseIterable.caseLabels` for how the labels are derived.
+     */
+    @available(*, deprecated, message: "Use `CaseIterable.caseLabels` instead")
+    public init?<T>(caseLabelsFrom type: T.Type) {
+        // Check if T conforms to CaseIterable at runtime.
+        guard let caseIterableType = type as? any CaseIterable.Type else {
+            return nil
         }
+
+        self = caseIterableType.caseLabels
     }
 }

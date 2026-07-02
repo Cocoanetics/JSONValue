@@ -9,7 +9,7 @@ import Foundation
 
 /// Coding keys for `JSONSchema` encoding and decoding, shared across the
 /// per-file extensions that implement `Codable`.
-internal enum JSONSchemaCodingKeys: String, CodingKey {
+enum JSONSchemaCodingKeys: String, CodingKey {
     /// The type of the schema (string, number, boolean, array, or object)
     case type
     /// The properties of an object schema
@@ -254,11 +254,10 @@ extension JSONSchema: Codable {
         }
         if (try? container.decodeIfPresent(JSONSchema.self, forKey: .additionalProperties)) != nil {
             // JSON Schema allows `additionalProperties` to be either a Boolean or another schema.
-            // SwiftMCP's in-memory model currently stores only the Boolean form, so preserve
+            // JSONSchema's in-memory model currently stores only the Boolean form, so preserve
             // permissive behavior when a schema object is provided by third-party MCP servers.
             return true
         }
         return nil
     }
-
 }

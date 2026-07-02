@@ -2,7 +2,9 @@
 ///
 /// A generic, transport-agnostic launch descriptor shared by every stdio
 /// consumer (LSP, ACP, MCP). Not tied to any one process API — `Foundation.Process`
-/// and `swift-subprocess` both consume it.
+/// and `swift-subprocess` both consume it. It lives in `JSONRPCWire` because that
+/// is the shared, dependency-free module both stdio transports (`JSONRPCStdio` and
+/// `JSONRPCSubprocess`) already import — it is a launch *description*, not I/O.
 public struct ProcessLaunch: Sendable {
     public var executable: String
     public var arguments: [String]

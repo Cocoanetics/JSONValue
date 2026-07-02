@@ -5,9 +5,19 @@ import JSONFoundation
 import JSONRPCPeer
 import JSONRPCWire
 
+/// How the child process ended, as reported by ``ProcessTransport/waitForExit()``.
 public struct ProcessExit: Sendable {
+    /// The child's termination status (exit code, or signal number for
+    /// `.uncaughtSignal`).
     public var code: Int32
+
+    /// Whether the child exited normally or was killed by an uncaught signal.
     public var reason: Process.TerminationReason
+
+    public init(code: Int32, reason: Process.TerminationReason) {
+        self.code = code
+        self.reason = reason
+    }
 }
 
 /// Errors specific to launching the `Foundation.Process` transport.
@@ -23,13 +33,14 @@ public enum ProcessTransportError: Error, LocalizedError {
 
 /// A ``JSONRPCMessageTransport`` backed by `Foundation.Process` — the
 /// zero-dependency stdio transport, always available (no `Subprocess` trait).
+/// Ships in the `JSONRPCStdio` module/product.
 ///
-/// It shares the framing layer with ``StdioMessageTransport`` (it's generic over
+/// It shares the framing layer with ``StdioTransport`` (it's generic over
 /// `MessageFraming` too); only the process/IO mechanics differ. A dedicated reader
 /// thread and two `NSLock`s bridge Foundation's blocking reads and its
 /// `terminationHandler` callback — the very machinery the `swift-subprocess`-based
-/// ``StdioMessageTransport`` removes. Prefer the latter (trait `Subprocess`) for
-/// cross-platform, lock-free I/O; this one needs no dependency.
+/// ``StdioTransport`` (module `JSONRPCSubprocess`, trait `Subprocess`) removes.
+/// Prefer that one for cross-platform, lock-free I/O; this one needs no dependency.
 public final class ProcessTransport<Framing: MessageFraming>: JSONRPCMessageTransport, @unchecked Sendable {
     private let framing: Framing
     private let process = Process()
@@ -41,6 +52,7 @@ public final class ProcessTransport<Framing: MessageFraming>: JSONRPCMessageTran
     private var exitResult: ProcessExit?
     private var exitWaiters: [CheckedContinuation<ProcessExit, Never>] = []
 
+    /// The child's process identifier (pid), valid once launched.
     public var processIdentifier: Int32 { process.processIdentifier }
 
     public init(launch: ProcessLaunch, framing: Framing) throws {
@@ -104,22 +116,16 @@ public final class ProcessTransport<Framing: MessageFraming>: JSONRPCMessageTran
         let framing = self.framing
         return AsyncThrowingStream { continuation in
             let handle = stdoutPipe.fileHandleForReading
-            let thread = Thread {
-                var decoder = framing
-                while true {
-                    let chunk = handle.availableData
-                    if chunk.isEmpty { break } // EOF: child closed stdout
-                    for body in decoder.push(chunk) {
-                        if let message = try? JSONRPCMessage.decodeMessages(from: body).first {
-                            continuation.yield(message)
-                        }
+            startFramedReaderThread(
+                name: "jsonrpc.process.reader",
+                framing: framing,
+                readChunk: { handle.availableData }, // empty on EOF: child closed stdout
+                onBody: { body in
+                    for message in (try? JSONRPCMessage.decodeMessages(from: body)) ?? [] {
+                        continuation.yield(message)
                     }
-                }
-                continuation.finish()
-            }
-            thread.name = "jsonrpc.process.reader"
-            thread.stackSize = 4 << 20
-            thread.start()
+                },
+                onEOF: { continuation.finish() })
 
             continuation.onTermination = { [weak self] _ in
                 self?.close()
@@ -143,16 +149,42 @@ public final class ProcessTransport<Framing: MessageFraming>: JSONRPCMessageTran
     }
 
     private static func resolveExecutable(_ command: String) -> URL {
-        if command.contains("/") {
+        // Platform conventions differ: Windows separates PATH entries with ";"
+        // (a ":" split would shred drive-letter paths like C:\Windows), accepts
+        // both slash styles and drive-prefixed commands, and finds executables
+        // by extension.
+        #if os(Windows)
+        let isExplicitPath = command.contains("\\") || command.contains("/")
+            || command.dropFirst().first == ":"
+        let listSeparator: Character = ";"
+        let defaultPath = ""
+        let suffixes = ["", ".exe", ".cmd", ".bat"]
+        #else
+        let isExplicitPath = command.contains("/")
+        let listSeparator: Character = ":"
+        let defaultPath = "/usr/bin:/bin"
+        let suffixes = [""]
+        #endif
+
+        if isExplicitPath {
             return URL(fileURLWithPath: command)
         }
-        let defaultPath = "/usr/bin:/bin"
+        #if os(Windows)
+        // Windows environment names are case-insensitive and the variable is
+        // conventionally spelled `Path`; Foundation's dictionary lookup is
+        // case-sensitive, so match by folded key.
+        let path = ProcessInfo.processInfo.environment
+            .first { $0.key.uppercased() == "PATH" }?.value ?? defaultPath
+        #else
         let path = ProcessInfo.processInfo.environment["PATH"] ?? defaultPath
-        for directory in path.split(separator: ":") where !directory.isEmpty {
-            let candidate = URL(fileURLWithPath: String(directory))
-                .appendingPathComponent(command)
-            if FileManager.default.isExecutableFile(atPath: candidate.path) {
-                return candidate
+        #endif
+        for directory in path.split(separator: listSeparator) where !directory.isEmpty {
+            for suffix in suffixes {
+                let candidate = URL(fileURLWithPath: String(directory))
+                    .appendingPathComponent(command + suffix)
+                if FileManager.default.isExecutableFile(atPath: candidate.path) {
+                    return candidate
+                }
             }
         }
         return URL(fileURLWithPath: command)
