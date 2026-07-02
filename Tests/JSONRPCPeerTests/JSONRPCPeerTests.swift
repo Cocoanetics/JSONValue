@@ -43,7 +43,8 @@ final class SpyTransport: JSONRPCMessageTransport, @unchecked Sendable {
     func close() { finishInbound() }
 }
 
-@Test func correlatesRequestWithItsResponse() async throws {
+@Test(.timeLimit(.minutes(1)))
+func correlatesRequestWithItsResponse() async throws {
     let transport = SpyTransport()
     transport.onSend = { message, transport in
         if case .request(let request) = message {
@@ -58,7 +59,8 @@ final class SpyTransport: JSONRPCMessageTransport, @unchecked Sendable {
     await peer.close()
 }
 
-@Test func surfacesErrorResponsesAsThrows() async throws {
+@Test(.timeLimit(.minutes(1)))
+func surfacesErrorResponsesAsThrows() async throws {
     let transport = SpyTransport()
     transport.onSend = { message, transport in
         if case .request(let request) = message {
@@ -178,7 +180,8 @@ private final class CapturingSink: JSONRPCMessageSink, @unchecked Sendable {
     var sent: [JSONRPCMessage] { lock.lock(); defer { lock.unlock() }; return _sent }
 }
 
-@Test func pushModeCorrelatesOutboundRequestsViaIngest() async throws {
+@Test(.timeLimit(.minutes(1)))
+func pushModeCorrelatesOutboundRequestsViaIngest() async throws {
     // The peer never reads a wire here: outbound goes to a sink, and a reply is
     // fed back through `ingest` — exactly how SwiftMCP's MCPServerProxy/Session
     // (which own their own read loop) would delegate correlation to the peer.
@@ -195,16 +198,25 @@ private final class CapturingSink: JSONRPCMessageSink, @unchecked Sendable {
     await peer.close()
 }
 
-@Test func streamEndFailsPendingRequests() async throws {
+@Test(.timeLimit(.minutes(1)))
+func streamEndFailsPendingRequests() async throws {
     let transport = SpyTransport()
     let peer = JSONRPCPeer(transport: transport)
     await peer.start()
 
+    // onSend fires synchronously inside sendRequest, after the continuation is
+    // parked — so the request is guaranteed pending before the stream finishes.
+    let parked = OnceBox<JSONRPCMessage>()
+    transport.onSend = { message, _ in parked.fire(message) }
+
+    let request = Task {
+        try await peer.sendRequest(method: "hang", params: nil)
+    }
+    _ = await parked.value
+    transport.finishInbound()
+
     await #expect(throws: JSONRPCPeerError.self) {
-        async let result = peer.sendRequest(method: "hang", params: nil)
-        try await Task.sleep(for: .milliseconds(50))
-        transport.finishInbound()
-        _ = try await result
+        _ = try await request.value
     }
 }
 
@@ -231,7 +243,8 @@ func sendRequestHonorsTaskCancellation() async throws {
     await peer.close()
 }
 
-@Test func sendRequestAfterStreamEndRejects() async throws {
+@Test(.timeLimit(.minutes(1)))
+func sendRequestAfterStreamEndRejects() async throws {
     // After the inbound stream ends, a *new* request must reject rather than park a
     // continuation no reader will ever resolve.
     let transport = SpyTransport()

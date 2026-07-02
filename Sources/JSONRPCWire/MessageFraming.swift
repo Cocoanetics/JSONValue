@@ -6,7 +6,7 @@ import Foundation
 /// LSP uses HTTP-style `Content-Length` headers; ACP and MCP use one
 /// newline-terminated JSON line. Everything else about a stdio transport is
 /// identical, so making framing pluggable is what lets a single
-/// ``StdioMessageTransport`` serve all three.
+/// `StdioTransport` serve all three.
 ///
 /// `frame(_:)` is pure (body → bytes-on-wire). Decoding is stateful — bytes arrive
 /// without respecting message boundaries — so a transport keeps its own *value

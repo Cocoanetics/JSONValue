@@ -22,25 +22,3 @@ import Testing
     #expect(SSEEventID("\(UUID().uuidString):abc") == nil)
     #expect(SSEEventID(UUID().uuidString) == nil)             // no colon at all
 }
-
-@Test func sseMessageDescriptionMatchesEncoder() {
-    // SSEMessage delegates wire encoding to SSEEventEncoder; assert they agree.
-    #expect(SSEMessage(data: "hi", id: "s:1").description == "id: s:1\ndata: hi\n\n")
-    #expect(SSEMessage(data: "").description == "data:\n\n")
-    #expect(SSEMessage(data: "a\nb").description == "data: a\ndata: b\n\n")
-    #expect(SSEMessage(data: "u", eventName: "endpoint").description == "event: endpoint\ndata: u\n\n")
-    #expect(SSEMessage(comment: "ka").description == ": ka\n")
-}
-
-@Test func parsePreservesDataWhitespace() {
-    // Valid SSE strips only the single optional space after the colon; a payload
-    // with intentional surrounding whitespace must survive description → init.
-    func dataValue(_ message: SSEMessage?) -> String? {
-        guard case .field(_, let value, _)? = message?.event else { return nil }
-        return value
-    }
-    for payload in [" x ", "  leading", "trailing  ", "a\n b ", "mid  gap", "plain"] {
-        let reparsed = SSEMessage(SSEMessage(data: payload).description)
-        #expect(dataValue(reparsed) == payload, "payload \(payload.debugDescription)")
-    }
-}

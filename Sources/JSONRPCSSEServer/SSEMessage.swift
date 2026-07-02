@@ -41,6 +41,10 @@ public struct SSEMessage: LosslessStringConvertible, Sendable, Hashable {
 
     /// Whether this message is a replayable `data` event (comments are not
     /// buffered for resume).
+    ///
+    /// Also `false` for a ``SSEEvent/field(name:value:eventName:)`` whose name is
+    /// not `"data"`: such a message still *renders* as a `data:` event (see the
+    /// note on that case), but it never enters ``SSEStreamHub``'s replay buffer.
     public var isReplayableDataEvent: Bool {
         switch event {
         case .comment:
@@ -50,12 +54,16 @@ public struct SSEMessage: LosslessStringConvertible, Sendable, Hashable {
         }
     }
 
-    /// Parses an SSE message from its text form. Expects:
+    /// Parses an SSE message from its text form. Expects either a data event:
     /// ```
     /// [id: value\n]
     /// [retry: value\n]
     /// [event: name\n]
     /// data: content\n\n
+    /// ```
+    /// or a comment message:
+    /// ```
+    /// : comment\n
     /// ```
     public init?(_ description: String) {
         let lines = description.split(separator: "\n", omittingEmptySubsequences: false)
@@ -63,6 +71,7 @@ public struct SSEMessage: LosslessStringConvertible, Sendable, Hashable {
         var dataLines: [String] = []
         var eventID: String?
         var retry: Int?
+        var comment: String?
 
         for line in lines {
             if line.starts(with: "id:") {
@@ -73,11 +82,21 @@ public struct SSEMessage: LosslessStringConvertible, Sendable, Hashable {
                 eventName = Self.fieldValue(line, colonPrefix: 6)
             } else if line.starts(with: "data:") {
                 dataLines.append(Self.fieldValue(line, colonPrefix: 5))
+            } else if line.starts(with: ":"), comment == nil {
+                comment = Self.fieldValue(line, colonPrefix: 1)
             }
         }
 
         guard !dataLines.isEmpty else {
-            return nil
+            // No data lines: the message can still be a lone comment, which
+            // carries no id/retry envelope — mirroring ``init(comment:)``.
+            guard let comment else {
+                return nil
+            }
+            self.event = .comment(comment)
+            self.id = nil
+            self.retry = nil
+            return
         }
 
         self.event = .field(name: "data", value: dataLines.joined(separator: "\n"), eventName: eventName)

@@ -26,11 +26,27 @@ import SwiftCross
 /// (The *server* side — choosing single-vs-stream and routing each reply onto its
 /// originating request's response — needs the richer dispatch+scope boundary and is
 /// out of scope here.)
+///
+/// **Error handling is best-effort:** a failed POST — and any response body that
+/// does not decode as JSON-RPC — is dropped silently; nothing is yielded and no
+/// error is thrown on the inbound stream. A pending request whose POST failed
+/// therefore surfaces its failure only at a higher layer (e.g. the caller's
+/// timeout, or ``close()`` failing everything pending). Routing an HTTP error back
+/// to its originating request would contradict the id-blind design above.
 public final class SSEClientTransport: JSONRPCMessageTransport, @unchecked Sendable {
     private let outbound: AsyncStream<JSONRPCMessage>.Continuation
     private let inbound: AsyncThrowingStream<JSONRPCMessage, any Error>
     private let pumpTask: Task<Void, Never>
 
+    /// Creates a transport that POSTs every outbound message to one HTTP endpoint.
+    ///
+    /// - Parameters:
+    ///   - endpoint: The JSON-RPC endpoint URL each message is POSTed to.
+    ///   - session: The `URLSession` performing the POSTs — pass a custom one for
+    ///     proxying, certificate pinning, or timeout policy.
+    ///   - headers: Additional header fields set on every POST, e.g.
+    ///     `Authorization` or MCP's `Mcp-Session-Id`. (`Content-Type` and `Accept`
+    ///     are set by the transport.)
     public init(endpoint: URL, session: URLSession = .shared, headers: [String: String] = [:]) {
         let (outboundStream, outboundContinuation) = AsyncStream<JSONRPCMessage>.makeStream()
         let (inboundStream, inboundContinuation) = AsyncThrowingStream<JSONRPCMessage, any Error>.makeStream()

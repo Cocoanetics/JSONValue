@@ -135,6 +135,30 @@ private func collect(_ stream: AsyncStream<Data>, count: Int) async -> [String] 
     #expect(chunks[0] == "id: \(sid.uuidString):2\ndata: one\n\n")
 }
 
+@Test(.timeLimit(.minutes(1))) func evictionDropsOldestEventsAndTheirResumeAnchors() async throws {
+    let hub = SSEStreamHub(bufferCapacity: 2, retentionInterval: 60)
+    let (_, sid) = hub.open(replayable: true, primed: false, rejectsSendAfterCompletion: true)
+    let token = hub.attach(sink: FakeSink(), streamID: sid)
+    hub.send(SSEMessage(data: "one"), to: sid)   // sid:1
+    hub.send(SSEMessage(data: "two"), to: sid)   // sid:2
+    hub.send(SSEMessage(data: "three"), to: sid) // sid:3 — evicts sid:1
+    hub.send(SSEMessage(data: "four"), to: sid)  // sid:4 — evicts sid:2
+
+    hub.markDisconnected(streamID: sid, connectionToken: token)
+
+    // The two oldest events were evicted; their ids no longer anchor a resume.
+    for evicted in 1...2 {
+        #expect(throws: SSEStreamResumeError.resumePointUnavailable) {
+            _ = try hub.resume(streamID: sid, after: SSEEventID(streamID: sid, sequence: evicted))
+        }
+    }
+
+    // The oldest RETAINED event (sid:3) still anchors; only the tail follows.
+    let resumed = try hub.resume(streamID: sid, after: SSEEventID(streamID: sid, sequence: 3))
+    let chunks = await collect(resumed, count: 1)
+    #expect(chunks == ["id: \(sid.uuidString):4\ndata: four\n\n"])
+}
+
 @Test func expiredStreamIDsReportPastRetention() async {
     let hub = SSEStreamHub(bufferCapacity: 8, retentionInterval: 0)
     let (_, sid) = hub.open(replayable: true, primed: false, rejectsSendAfterCompletion: true)

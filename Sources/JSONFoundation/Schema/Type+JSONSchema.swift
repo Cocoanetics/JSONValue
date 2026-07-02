@@ -1,17 +1,56 @@
 import Foundation
 
-/// Protocol for types that can be converted to JSON Schema types
+/// A type that supplies its own JSON Schema representation.
+///
+/// Conformance is the first stop in the runtime type-to-schema fallback chain
+/// (see `JSONSchema.schema(for:description:)`): it takes precedence over
+/// `SchemaRepresentable` metadata and the `CaseIterable` enum handling.
 public protocol JSONSchemaTypeConvertible {
     /// The JSON Schema representation for this type
     static func jsonSchema(description: String?) -> JSONSchema
 }
 
-// Add automatic conformance for CaseIterable types
+// MARK: - Shared fallback chain
+
+extension JSONSchema {
+    /// Resolves the schema for an arbitrary runtime type using the shared fallback chain:
+    /// `JSONSchemaTypeConvertible` → `SchemaRepresentable` → `CaseIterable` → plain string.
+    ///
+    /// Used by `SchemaPropertyInfo.schema` and the `Array`/`Optional` conformances below,
+    /// so future additions to the chain only need to be made here.
+    static func schema(for type: Any.Type, description: String?) -> JSONSchema {
+        // If this is a JSONSchemaTypeConvertible type, use its schema
+        if let convertibleType = type as? any JSONSchemaTypeConvertible.Type {
+            return convertibleType.jsonSchema(description: description)
+        }
+
+        // If this is a SchemaRepresentable type, use its schema
+        if let schemaType = type as? any SchemaRepresentable.Type {
+            return schemaType.schemaMetadata.schema
+        }
+
+        // If this is a CaseIterable type that isn't JSONSchemaTypeConvertible,
+        // return a string schema with enum values
+        if let caseIterableType = type as? any CaseIterable.Type {
+            return .enum(values: caseIterableType.caseLabels, title: nil, description: description, enumNames: nil)
+        }
+
+        // Default to string for unknown types
+        return .string(title: nil, description: description, format: nil, minLength: nil, maxLength: nil)
+    }
+}
+
+// MARK: - CaseIterable default implementation
+
+// Default implementation so a CaseIterable enum gets an enum schema simply by
+// declaring JSONSchemaTypeConvertible conformance (opt-in, not automatic).
 extension CaseIterable {
     public static func jsonSchema(description: String?) -> JSONSchema {
         .enum(values: caseLabels, title: nil, description: description, enumNames: nil)
     }
 }
+
+// MARK: - Numeric conformances
 
 extension Int: JSONSchemaTypeConvertible {
     public static func jsonSchema(description: String?) -> JSONSchema {
@@ -85,11 +124,15 @@ extension Double: JSONSchemaTypeConvertible {
     }
 }
 
+// MARK: - Boolean conformance
+
 extension Bool: JSONSchemaTypeConvertible {
     public static func jsonSchema(description: String?) -> JSONSchema {
         .boolean(title: nil, description: description, defaultValue: nil)
     }
 }
+
+// MARK: - String-encoded conformances
 
 extension String: JSONSchemaTypeConvertible {
     public static func jsonSchema(description: String?) -> JSONSchema {
@@ -127,21 +170,16 @@ extension UUID: JSONSchemaTypeConvertible {
     }
 }
 
+// MARK: - Container conformances
+
 extension Array: JSONSchemaTypeConvertible {
     public static func jsonSchema(description: String?) -> JSONSchema {
-        let elementSchema: JSONSchema
-
-        if let elementType = Element.self as? any JSONSchemaTypeConvertible.Type {
-            elementSchema = elementType.jsonSchema(description: nil)
-        } else if let schemaType = Element.self as? any SchemaRepresentable.Type {
-            elementSchema = schemaType.schemaMetadata.schema
-        } else if let caseIterableType = Element.self as? any CaseIterable.Type {
-            elementSchema = .enum(values: caseIterableType.caseLabels, title: nil, description: nil, enumNames: nil)
-        } else {
-            elementSchema = .string(title: nil, description: nil, format: nil, minLength: nil, maxLength: nil)
-        }
-
-        return .array(items: elementSchema, title: nil, description: description)
+        // The array-level description stays on the wrapper; the element schema carries none.
+        .array(
+            items: JSONSchema.schema(for: Element.self, description: nil),
+            title: nil,
+            description: description
+        )
     }
 }
 
@@ -153,13 +191,6 @@ extension Dictionary: JSONSchemaTypeConvertible {
 
 extension Optional: JSONSchemaTypeConvertible {
     public static func jsonSchema(description: String?) -> JSONSchema {
-        if let wrappedType = Wrapped.self as? any JSONSchemaTypeConvertible.Type {
-            return wrappedType.jsonSchema(description: description)
-        } else if let schemaType = Wrapped.self as? any SchemaRepresentable.Type {
-            return schemaType.schemaMetadata.schema
-        } else if let caseIterableType = Wrapped.self as? any CaseIterable.Type {
-            return .enum(values: caseIterableType.caseLabels, title: nil, description: description, enumNames: nil)
-        }
-        return .string(title: nil, description: description, format: nil, minLength: nil, maxLength: nil)
+        JSONSchema.schema(for: Wrapped.self, description: description)
     }
 }

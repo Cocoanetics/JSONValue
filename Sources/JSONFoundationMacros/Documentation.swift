@@ -2,29 +2,22 @@
 //  Documentation.swift
 //  JSONFoundationMacros
 //
-//  Parses a leading-trivia doc-comment block into a description, parameter
-//  descriptions, and a returns section. Used by `@Schema` to source field
-//  descriptions from `///` comments.
+//  Parses a leading-trivia doc-comment block into the plain-text description
+//  `@Schema` emits for structs and properties. Dash-prefixed section markers
+//  (`- Parameter …`, `- Returns: …`, `- Note: …`) end the description; the
+//  sections themselves carry no schema-relevant content and are discarded.
 //
 
 import Foundation
 
 struct Documentation {
-    /// The function's initial (multi‑line) description.
+    /// The doc comment's initial (multi-line) description, up to the first
+    /// dash-prefixed section marker.
     let description: String
-    /// A dictionary mapping parameter names to their descriptions.
-    let parameters: [String: String]
-    /// The returns section of the documentation, if present.
-    let returns: String?
 
     init(from text: String) {
         let cleanedLines = Self.cleanDocumentationLines(from: text)
-        let parsed = Self.parseSections(from: cleanedLines)
-
-        self.description = Self.combineLines(parsed.descriptionLines)
-        self.parameters = parsed.parameters
-        let returnsDescription = Self.combineLines(parsed.returnsLines)
-        self.returns = returnsDescription.isEmpty ? nil : returnsDescription
+        self.description = Self.combineLines(Self.descriptionLines(from: cleanedLines))
     }
 
     // MARK: - Line cleaning
@@ -114,8 +107,9 @@ struct Documentation {
     }
 
     /// Splits a single-line block that contains multiple inline `- Parameter`
-    /// entries into separate lines. Returns true if a split occurred and the
-    /// caller should skip default appending.
+    /// entries into separate lines, so the leading description text can be
+    /// isolated from them. Returns true if a split occurred and the caller
+    /// should skip default appending.
     private static func appendSplitParameters(line: String, into cleanedLines: inout [String]) -> Bool {
         let parts = line.components(separatedBy: " - Parameter ")
         guard parts.count > 1 else { return false }
@@ -126,149 +120,14 @@ struct Documentation {
         return true
     }
 
-    // MARK: - Section parsing
+    // MARK: - Section filtering
 
-    private struct ParsedDocumentation {
-        var descriptionLines: [String] = []
-        var parameters: [String: String] = [:]
-        var returnsLines: [String] = []
-    }
-
-    private final class ParsingState {
-        var currentParameterName: String?
-        var currentParameterLines: [String] = []
-        var inReturnsSection = false
-        var inParametersSection = false
-        var inOtherSection = false
-    }
-
-    /// Walks the cleaned lines and populates the description, parameters, and
-    /// returns sections.
-    private static func parseSections(from cleanedLines: [String]) -> ParsedDocumentation {
-        var result = ParsedDocumentation()
-        let state = ParsingState()
-
-        for line in cleanedLines {
-            if line.hasPrefix("-") {
-                handleDashLine(line, state: state, result: &result)
-            } else if state.inParametersSection && line.hasPrefix("  ") {
-                handleIndentedParameterLine(line, state: state, result: &result)
-            } else {
-                handleContinuationLine(line, state: state, result: &result)
-            }
-        }
-
-        flushCurrentParameter(state: state, result: &result)
-        return result
-    }
-
-    private static func handleDashLine(
-        _ line: String,
-        state: ParsingState,
-        result: inout ParsedDocumentation
-    ) {
-        let lowered = line.lowercased()
-
-        if lowered.hasPrefix("- parameters:") {
-            flushCurrentParameter(state: state, result: &result)
-            state.inReturnsSection = false
-            state.inParametersSection = true
-            state.inOtherSection = false
-            return
-        }
-
-        if lowered.hasPrefix("- returns:") {
-            flushCurrentParameter(state: state, result: &result)
-            state.inParametersSection = false
-            state.inOtherSection = false
-            let returnsDescription = line.dropFirst("- Returns:".count).trimmingCharacters(in: .whitespaces)
-            result.returnsLines = [returnsDescription]
-            state.inReturnsSection = true
-            return
-        }
-
-        if let param = parseParameterLine(from: line) {
-            flushCurrentParameter(state: state, result: &result)
-            state.inReturnsSection = false
-            state.inParametersSection = false
-            state.inOtherSection = false
-            state.currentParameterName = param.name
-            state.currentParameterLines = [param.description]
-            return
-        }
-
-        if state.inParametersSection, let param = parseSimpleParameterLine(from: line) {
-            flushCurrentParameter(state: state, result: &result)
-            state.currentParameterName = param.name
-            state.currentParameterLines = [param.description]
-            return
-        }
-
-        // Any other dash-prefixed line is a section we don't handle.
-        flushCurrentParameter(state: state, result: &result)
-        state.inReturnsSection = false
-        state.inParametersSection = false
-        state.inOtherSection = true
-    }
-
-    private static func handleIndentedParameterLine(
-        _ line: String,
-        state: ParsingState,
-        result: inout ParsedDocumentation
-    ) {
-        let trimmedLine = line.trimmingCharacters(in: .whitespaces)
-        if trimmedLine.hasPrefix("-") {
-            if let param = parseSimpleParameterLine(from: trimmedLine) {
-                flushCurrentParameter(state: state, result: &result)
-                state.currentParameterName = param.name
-                state.currentParameterLines = [param.description]
-            }
-        } else if state.currentParameterName != nil {
-            state.currentParameterLines.append(trimmedLine)
-        }
-    }
-
-    private static func handleContinuationLine(
-        _ line: String,
-        state: ParsingState,
-        result: inout ParsedDocumentation
-    ) {
-        if state.currentParameterName != nil {
-            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
-            if !trimmedLine.isEmpty {
-                state.currentParameterLines.append(trimmedLine)
-            }
-        } else if state.inReturnsSection && !state.inOtherSection {
-            result.returnsLines.append(line)
-        } else if !state.inParametersSection && !state.inOtherSection {
-            result.descriptionLines.append(line)
-        }
-    }
-
-    private static func flushCurrentParameter(
-        state: ParsingState,
-        result: inout ParsedDocumentation
-    ) {
-        if let paramName = state.currentParameterName {
-            let fullDescription = state.currentParameterLines
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-                .joined(separator: " ")
-            result.parameters[paramName] = fullDescription
-        }
-        state.currentParameterName = nil
-        state.currentParameterLines = []
-    }
-
-    private static func parseSimpleParameterLine(from line: String) -> (name: String, description: String)? {
-        guard line.hasPrefix("-") else { return nil }
-        let trimmedLine = line.trimmingCharacters(in: .whitespaces)
-        guard let colonIndex = trimmedLine.firstIndex(of: ":") else { return nil }
-        let nameStart = trimmedLine.index(trimmedLine.startIndex, offsetBy: 1)
-        let name = trimmedLine[nameStart..<colonIndex].trimmingCharacters(in: .whitespaces)
-        let afterColon = trimmedLine[trimmedLine.index(after: colonIndex)...]
-        let description = afterColon.trimmingCharacters(in: .whitespaces)
-        return (name: name, description: description)
+    /// Returns the lines that make up the description: everything up to the
+    /// first dash-prefixed line. `- Parameter …`, `- Returns: …`, and any
+    /// other `- Section:` marker start structured sections that never feed
+    /// back into the description.
+    private static func descriptionLines(from cleanedLines: [String]) -> [String] {
+        Array(cleanedLines.prefix { !$0.hasPrefix("-") })
     }
 
     // MARK: - Combining
@@ -293,23 +152,4 @@ struct Documentation {
         }
         return combined.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-}
-
-/// Helper that checks if a line defines a parameter and, if so, extracts its name and description.
-/// Expected format: "- Parameter <name>: <description>"
-private func parseParameterLine(from line: String) -> (name: String, description: String)? {
-    // Check case-insensitively if the line starts with "- Parameter"
-    if line.lowercased().hasPrefix("- parameter") {
-        // Remove the prefix.
-        let startIndex = line.index(line.startIndex, offsetBy: "- Parameter".count)
-        let remainder = line[startIndex...].trimmingCharacters(in: .whitespaces)
-
-        // Expect a colon separating the parameter name from its description.
-        if let colonIndex = remainder.firstIndex(of: ":") {
-            let name = remainder[..<colonIndex].trimmingCharacters(in: .whitespaces)
-            let description = remainder[remainder.index(after: colonIndex)...].trimmingCharacters(in: .whitespaces)
-            return (name: name, description: description)
-        }
-    }
-    return nil
 }

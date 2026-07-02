@@ -147,23 +147,22 @@ public final class TCPClientTransport<Framing: MessageFraming>: JSONRPCMessageTr
         let framing = self.framing
         let descriptor = self.descriptor
         return AsyncThrowingStream { continuation in
-            let thread = Thread {
-                var decoder = framing
-                var buffer = [UInt8](repeating: 0, count: 64 * 1024)
-                while true {
-                    let count = buffer.withUnsafeMutableBytes { read(descriptor, $0.baseAddress, $0.count) }
-                    if count <= 0 { break } // EOF or error: the peer closed the socket
-                    for body in decoder.push(Data(buffer[0 ..< count])) {
-                        for message in (try? JSONRPCMessage.decodeMessages(from: body)) ?? [] {
-                            continuation.yield(message)
-                        }
+            let buffer = ReadBuffer()
+            startFramedReaderThread(
+                name: "jsonrpc.tcp.reader",
+                framing: framing,
+                readChunk: {
+                    let count = buffer.bytes.withUnsafeMutableBytes { read(descriptor, $0.baseAddress, $0.count) }
+                    // EOF or error: the peer closed the socket → empty signals EOF.
+                    guard count > 0 else { return Data() }
+                    return Data(buffer.bytes[0 ..< count])
+                },
+                onBody: { body in
+                    for message in (try? JSONRPCMessage.decodeMessages(from: body)) ?? [] {
+                        continuation.yield(message)
                     }
-                }
-                continuation.finish()
-            }
-            thread.name = "jsonrpc.tcp.reader"
-            thread.stackSize = 4 << 20
-            thread.start()
+                },
+                onEOF: { continuation.finish() })
 
             continuation.onTermination = { [weak self] _ in
                 self?.close()
@@ -183,6 +182,14 @@ public final class TCPClientTransport<Framing: MessageFraming>: JSONRPCMessageTr
         shutdown(descriptor, Int32(SHUT_RDWR))
         systemClose(descriptor)
     }
+}
+
+/// The reusable 64 KiB read buffer the inbound reader thread drains the socket
+/// into. A class (rather than a captured `var`) so the `@Sendable` `readChunk`
+/// closure may hold it; `@unchecked` is safe because only the single reader
+/// thread ever touches it.
+private final class ReadBuffer: @unchecked Sendable {
+    var bytes = [UInt8](repeating: 0, count: 64 * 1024)
 }
 
 /// Calls the C library `close(2)` unambiguously — at file scope the transport's

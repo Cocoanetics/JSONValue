@@ -23,7 +23,8 @@ private func waitUntil(_ caller: Caller, pending target: Int) async {
     while await caller.pending < target { await Task.yield() }
 }
 
-@Test func resolvesARegisteredWaiter() async throws {
+@Test(.timeLimit(.minutes(1)))
+func resolvesARegisteredWaiter() async throws {
     let caller = Caller()
     async let reply = caller.send("a")
     await waitUntil(caller, pending: 1)
@@ -39,7 +40,8 @@ private func waitUntil(_ caller: Caller, pending target: Int) async {
     #expect(correlator.isPending("nope") == false)
 }
 
-@Test func aSecondResolveDoesNotResumeTwice() async throws {
+@Test(.timeLimit(.minutes(1)))
+func aSecondResolveDoesNotResumeTwice() async throws {
     let caller = Caller()
     async let reply = caller.send("a")
     await waitUntil(caller, pending: 1)
@@ -48,7 +50,8 @@ private func waitUntil(_ caller: Caller, pending target: Int) async {
     #expect(try await reply == 1)
 }
 
-@Test func failAllRejectsEveryWaiter() async {
+@Test(.timeLimit(.minutes(1)))
+func failAllRejectsEveryWaiter() async {
     let caller = Caller()
     async let reply1: Int = caller.send("a")
     async let reply2: Int = caller.send("b")

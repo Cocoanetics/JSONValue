@@ -4,6 +4,11 @@
 //
 //  Created by Oliver Drobnik on 18.03.25.
 //
+//  The message enum itself: case declarations, the per-case data structs, and
+//  the convenience factories. The wire codec lives in
+//  `JSONRPCMessage+Decoding.swift` / `JSONRPCMessage+Encoding.swift`, and the
+//  ergonomic case/field accessors in `JSONRPCMessage+Accessors.swift`.
+//
 
 /**
  Enum representing all possible JSON-RPC message types.
@@ -130,26 +135,13 @@ public enum JSONRPCMessage: Codable, Sendable, Hashable {
         }
     }
 
-    // MARK: - Computed Properties
+    // MARK: - Coding Keys
 
-    /// The JSON-RPC protocol version, typically "2.0"
-    public var jsonrpc: String {
-        switch self {
-        case .request(let data): return data.jsonrpc
-        case .response(let data): return data.jsonrpc
-        case .errorResponse(let data): return data.jsonrpc
-        case .notification(let data): return data.jsonrpc
-        }
-    }
-
-    /// The unique identifier for the message, used to correlate requests and responses
-    public var id: JSONRPCID? {
-        switch self {
-        case .request(let data): return data.id
-        case .response(let data): return data.id
-        case .errorResponse(let data): return data.id
-        case .notification: return nil
-        }
+    /// Coding keys for the wire codec, shared by the `Decodable` implementation
+    /// in `JSONRPCMessage+Decoding.swift` and the `Encodable` implementation in
+    /// `JSONRPCMessage+Encoding.swift`.
+    internal enum CodingKeys: String, CodingKey {
+        case jsonrpc, id, method, params, result, error
     }
 
     // MARK: - Convenience Initializers
@@ -219,85 +211,5 @@ public enum JSONRPCMessage: Codable, Sendable, Hashable {
         params: JSONValue? = nil
     ) -> JSONRPCMessage {
         return .notification(JSONRPCNotificationData(jsonrpc: jsonrpc, method: method, params: params))
-    }
-
-    // MARK: - Codable Implementation
-
-    private enum CodingKeys: String, CodingKey {
-        case jsonrpc, id, method, params, result, error
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-
-        // All messages must have jsonrpc
-        let jsonrpc = try container.decode(String.self, forKey: .jsonrpc)
-        let id = try container.decodeIfPresent(JSONRPCID.self, forKey: .id)
-
-        // Determine message type based on available keys
-        if container.contains(.method) {
-            // This is a request or notification
-            let method = try container.decode(String.self, forKey: .method)
-            let params = try container.decodeIfPresent(JSONValue.self, forKey: .params)
-
-            if let id = id {
-                // Request with ID (expecting response)
-                self = .request(JSONRPCRequestData(jsonrpc: jsonrpc, id: id, method: method, params: params))
-            } else {
-                // Notification without ID (no response expected)
-                self = .notification(JSONRPCNotificationData(jsonrpc: jsonrpc, method: method, params: params))
-            }
-        } else if container.contains(.error) {
-            // This is an error response
-            let error = try container.decode(JSONRPCErrorResponseData.ErrorPayload.self, forKey: .error)
-            self = .errorResponse(JSONRPCErrorResponseData(jsonrpc: jsonrpc, id: id, error: error))
-        } else if container.contains(.result) {
-            // This is a result response - must have ID
-            guard let id = id else {
-                throw DecodingError.dataCorrupted(DecodingError.Context(
-                    codingPath: decoder.codingPath,
-                    debugDescription: "Response missing required id field"
-                ))
-            }
-
-            // `result` is required on success but may be any JSON value (object,
-            // array, primitive, or null).
-            let result = try container.decode(JSONValue.self, forKey: .result)
-            self = .response(JSONRPCResponseData(jsonrpc: jsonrpc, id: id, result: result))
-        } else {
-            throw DecodingError.dataCorrupted(DecodingError.Context(
-                codingPath: decoder.codingPath,
-                debugDescription: "Unable to determine JSON-RPC message type"
-            ))
-        }
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-
-        switch self {
-        case .request(let data):
-            try container.encode(data.jsonrpc, forKey: .jsonrpc)
-            try container.encode(data.id, forKey: .id)
-            try container.encode(data.method, forKey: .method)
-            try container.encodeIfPresent(data.params, forKey: .params)
-
-        case .notification(let data):
-            try container.encode(data.jsonrpc, forKey: .jsonrpc)
-            try container.encode(data.method, forKey: .method)
-            try container.encodeIfPresent(data.params, forKey: .params)
-
-        case .response(let data):
-            try container.encode(data.jsonrpc, forKey: .jsonrpc)
-            try container.encode(data.id, forKey: .id)
-            // `result` is required on success per the spec; a nil result is
-            // normalized to JSON null so the message stays valid and round-trips.
-            try container.encode(data.result ?? .null, forKey: .result)
-
-        case .errorResponse(let data):
-            try container.encode(data.jsonrpc, forKey: .jsonrpc)
-            try container.encodeIfPresent(data.id, forKey: .id)
-            try container.encode(data.error, forKey: .error)
-        }
     }
 }

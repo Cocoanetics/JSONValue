@@ -1,3 +1,12 @@
+//
+//  JSONRPCID.swift
+//  JSONFoundation
+//
+//  The request/response correlation id — an integer or a string — decoded from
+//  and encoded to either wire form. Literal conformances and log/debug
+//  renderings live in `JSONRPCID+Convenience.swift`.
+//
+
 import Foundation
 
 /// Represents the identifier for a JSON-RPC message which may be an integer or a string.

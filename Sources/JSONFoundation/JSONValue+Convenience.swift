@@ -73,3 +73,40 @@ public extension [String: JSONValue] {
         self = value.mapValues(JSONValue.init(jsonObject:))
     }
 }
+
+// MARK: - Collection Conveniences
+
+public extension [String: JSONValue] {
+    /// Encodes `value` and returns the resulting top-level object; throws
+    /// ``JSONValueError/expectedObject`` otherwise.
+    init<T: Encodable>(encoding value: T, using encoder: JSONEncoder = JSONCoding.makeValueEncoder()) throws {
+        let jsonValue = try JSONValue(encoding: value, using: encoder)
+        guard case .object(let object) = jsonValue else { throw JSONValueError.expectedObject }
+        self = object
+    }
+
+    /// The existential counterpart of the generic `init(encoding:using:)`, mirroring `JSONValue`'s pair.
+    init(encoding value: any Encodable, using encoder: JSONEncoder = JSONCoding.makeValueEncoder()) throws {
+        let jsonValue = try JSONValue(encoding: value, using: encoder)
+        guard case .object(let object) = jsonValue else { throw JSONValueError.expectedObject }
+        self = object
+    }
+
+    /// Decodes this object into `T` via ``JSONValue/decoded(_:using:)``.
+    func decoded<T: Decodable>(
+        _ type: T.Type = T.self,
+        using decoder: JSONDecoder = JSONCoding.makeDecoder()
+    ) throws -> T {
+        try JSONValue.object(self).decoded(type, using: decoder)
+    }
+}
+
+public extension [JSONValue] {
+    /// Decodes this array into `T` via ``JSONValue/decoded(_:using:)``.
+    func decoded<T: Decodable>(
+        _ type: T.Type = T.self,
+        using decoder: JSONDecoder = JSONCoding.makeDecoder()
+    ) throws -> T {
+        try JSONValue.array(self).decoded(type, using: decoder)
+    }
+}

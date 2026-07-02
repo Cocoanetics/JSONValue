@@ -2,8 +2,9 @@
 //  JSONRPCID+Convenience.swift
 //  JSONFoundation
 //
-//  Literal conformances and accessors so ids read naturally at call sites:
-//  `let id: JSONRPCID = 1` / `let id: JSONRPCID = "abc"`.
+//  Literal conformances and accessors so ids read naturally at call sites
+//  (`let id: JSONRPCID = 1` / `let id: JSONRPCID = "abc"`), plus the log and
+//  debug renderings.
 //
 
 import Foundation
@@ -23,11 +24,25 @@ extension JSONRPCID: ExpressibleByStringLiteral {
 }
 
 extension JSONRPCID: CustomStringConvertible {
-    /// The id as it travels on the wire — a bare number or the raw string.
+    /// A compact form for log summaries — the bare number or the unquoted
+    /// string. `.integer(1)` and `.string("1")` both render as `1`; use
+    /// ``debugDescription`` when that distinction matters.
     public var description: String {
         switch self {
         case .integer(let value): return String(value)
         case .string(let value): return value
+        }
+    }
+}
+
+extension JSONRPCID: CustomDebugStringConvertible {
+    /// The id in its wire form, disambiguating the cases that ``description``
+    /// conflates: an integer id stays bare (`.integer(1)` → `1`) while a
+    /// string id is quoted (`.string("1")` → `"1"`).
+    public var debugDescription: String {
+        switch self {
+        case .integer(let value): return String(value)
+        case .string(let value): return "\"\(value)\""
         }
     }
 }

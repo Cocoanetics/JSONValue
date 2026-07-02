@@ -47,7 +47,8 @@ final class SchemaMacroExpansionTests: XCTestCase {
         )
     }
 
-    /// A nested struct without its own @Schema gets a warning at its keyword.
+    /// A nested struct without its own @Schema gets a warning at its keyword,
+    /// with a fix-it that inserts the attribute.
     func testNestedStructWithoutSchemaWarns() {
         assertMacroExpansion(
             """
@@ -78,10 +79,18 @@ final class SchemaMacroExpansionTests: XCTestCase {
             diagnostics: [
                 DiagnosticSpec(
                     message: "Nested struct 'Inner' needs the @Schema annotation",
-                    line: 3, column: 5, severity: .warning
+                    line: 3, column: 5, severity: .warning,
+                    fixIts: [FixItSpec(message: "Add '@Schema'")]
                 )
             ],
-            macros: macros
+            macros: macros,
+            fixedSource: """
+            @Schema
+            struct Outer {
+                @Schema struct Inner {
+                }
+            }
+            """
         )
     }
 }

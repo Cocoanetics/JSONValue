@@ -66,9 +66,40 @@ public final class SSEStreamHub {
     private let retentionInterval: TimeInterval
     private var streams: [UUID: StreamRecord] = [:]
 
+    /// Creates a hub with the given replay and retention policy.
+    ///
+    /// - Parameters:
+    ///   - bufferCapacity: The maximum number of replayable data events kept
+    ///     **per stream** (counted in events, not bytes). When a stream's buffer
+    ///     overflows, the oldest events are evicted first; a resume whose
+    ///     `Last-Event-ID` anchor has been evicted throws
+    ///     ``SSEStreamResumeError/resumePointUnavailable``.
+    ///   - retentionInterval: How long (in seconds) a disconnected or finished
+    ///     stream stays resumable: ``markDisconnected(streamID:connectionToken:)``
+    ///     and ``finish(streamID:)`` set the stream's expiry deadline this far in
+    ///     the future, while ``attach(sink:streamID:)`` and
+    ///     ``resume(streamID:after:)`` clear it again — the retention clock only
+    ///     runs while the stream is disconnected.
     public init(bufferCapacity: Int = 256, retentionInterval: TimeInterval = 5 * 60) {
         self.bufferCapacity = bufferCapacity
         self.retentionInterval = retentionInterval
+    }
+
+    // MARK: - Record Access
+
+    /// Runs `body` on a value copy of the stream's record and writes the copy
+    /// back, so a mutation can't be lost to a forgotten writeback. Returns `nil`
+    /// (without calling `body`) when the stream is unknown.
+    ///
+    /// - Warning: `body` must not call back into the hub for the same stream —
+    ///   the deferred writeback would clobber whatever the nested call stored.
+    @discardableResult
+    private func withRecord<T>(_ streamID: UUID, _ body: (inout StreamRecord) throws -> T) rethrows -> T? {
+        guard var record = streams[streamID] else {
+            return nil
+        }
+        defer { streams[streamID] = record }
+        return try body(&record)
     }
 
     // MARK: - Lifecycle
@@ -110,50 +141,53 @@ public final class SSEStreamHub {
     /// Resume a retained stream from a `Last-Event-ID`, replaying every buffered
     /// event after the named one onto a fresh outbound stream.
     public func resume(streamID: UUID, after lastEventID: SSEEventID) throws -> AsyncStream<Data> {
-        guard var record = streams[streamID] else {
+        let resumed = try withRecord(streamID) { record -> (stream: AsyncStream<Data>, isCompleted: Bool) in
+            guard let replayIndex = record.buffer.firstIndex(where: { $0.id == lastEventID.description }) else {
+                throw SSEStreamResumeError.resumePointUnavailable
+            }
+
+            record.continuation?.finish()
+
+            let (stream, continuation) = AsyncStream<Data>.makeStream()
+            record.continuation = continuation
+            record.sink = nil
+            record.connectionToken = nil
+            record.expiresAt = nil
+            record.lastConnectedAt = Date()
+            record.lastActivityAt = Date()
+
+            for buffered in record.buffer[(replayIndex + 1)...] {
+                continuation.yield(buffered.payload)
+            }
+
+            if record.isCompleted {
+                continuation.finish()
+            }
+
+            return (stream, record.isCompleted)
+        }
+        guard let resumed else {
             throw SSEStreamResumeError.unknownStream
         }
-        guard let replayIndex = record.buffer.firstIndex(where: { $0.id == lastEventID.description }) else {
-            throw SSEStreamResumeError.resumePointUnavailable
-        }
-
-        record.continuation?.finish()
-
-        let (stream, continuation) = AsyncStream<Data>.makeStream()
-        record.continuation = continuation
-        record.sink = nil
-        record.connectionToken = nil
-        record.expiresAt = nil
-        record.lastConnectedAt = Date()
-        record.lastActivityAt = Date()
-        streams[streamID] = record
-
-        for buffered in record.buffer[(replayIndex + 1)...] {
-            continuation.yield(buffered.payload)
-        }
-
-        if record.isCompleted {
-            continuation.finish()
+        // Outside withRecord: markDisconnected re-enters the hub for this stream.
+        if resumed.isCompleted {
             markDisconnected(streamID: streamID, connectionToken: nil)
         }
-
-        return stream
+        return resumed.stream
     }
 
     /// Bind a live transport connection to a stream, returning the dedup token a
     /// later disconnect must present (so a stale close can't tear down a newer
     /// reconnect). Returns `nil` if the stream is unknown.
     public func attach(sink: any SSEStreamSink, streamID: UUID) -> UUID? {
-        guard var record = streams[streamID] else {
-            return nil
+        withRecord(streamID) { record in
+            let connectionToken = UUID()
+            record.sink = sink
+            record.connectionToken = connectionToken
+            record.expiresAt = nil
+            record.lastConnectedAt = Date()
+            return connectionToken
         }
-        let connectionToken = UUID()
-        record.sink = sink
-        record.connectionToken = connectionToken
-        record.expiresAt = nil
-        record.lastConnectedAt = Date()
-        streams[streamID] = record
-        return connectionToken
     }
 
     /// Mark a stream's current connection as gone while keeping its buffer for
@@ -162,36 +196,33 @@ public final class SSEStreamHub {
     /// reconciliation on a stale signal).
     @discardableResult
     public func markDisconnected(streamID: UUID, connectionToken: UUID?) -> Bool {
-        guard var record = streams[streamID] else {
-            return false
+        let acted = withRecord(streamID) { record -> Bool in
+            if let connectionToken, record.connectionToken != connectionToken {
+                return false
+            }
+            record.continuation?.finish()
+            record.continuation = nil
+            record.sink = nil
+            record.connectionToken = nil
+            record.expiresAt = Date().addingTimeInterval(retentionInterval)
+            record.lastActivityAt = Date()
+            return true
         }
-        if let connectionToken, record.connectionToken != connectionToken {
-            return false
-        }
-        record.continuation?.finish()
-        record.continuation = nil
-        record.sink = nil
-        record.connectionToken = nil
-        record.expiresAt = Date().addingTimeInterval(retentionInterval)
-        record.lastActivityAt = Date()
-        streams[streamID] = record
-        return true
+        return acted ?? false
     }
 
     /// Finish a stream after its terminal event: it is marked completed and held
     /// for the retention window (so a late resume still replays its tail).
     public func finish(streamID: UUID) {
-        guard var record = streams[streamID] else {
-            return
+        withRecord(streamID) { record in
+            record.isCompleted = true
+            record.expiresAt = Date().addingTimeInterval(retentionInterval)
+            record.lastActivityAt = Date()
+            record.continuation?.finish()
+            record.continuation = nil
+            record.sink = nil
+            record.connectionToken = nil
         }
-        record.isCompleted = true
-        record.expiresAt = Date().addingTimeInterval(retentionInterval)
-        record.lastActivityAt = Date()
-        record.continuation?.finish()
-        record.continuation = nil
-        record.sink = nil
-        record.connectionToken = nil
-        streams[streamID] = record
     }
 
     /// Drop a stream entirely: finish its continuation, force-close any live
@@ -225,32 +256,35 @@ public final class SSEStreamHub {
     /// else is written straight through. Returns whether the stream accepted it.
     @discardableResult
     public func send(_ message: SSEMessage, to streamID: UUID) -> Bool {
-        guard var record = streams[streamID] else {
-            return false
-        }
-        guard !record.isCompleted || !record.rejectsSendAfterCompletion else {
-            return false
-        }
-
-        var outbound = message
-        if record.replayable, outbound.isReplayableDataEvent {
-            if outbound.id == nil {
-                outbound.id = SSEEventID(streamID: streamID, sequence: record.nextSequence).description
-                record.nextSequence += 1
+        let accepted = withRecord(streamID) { record -> Bool in
+            guard !record.isCompleted || !record.rejectsSendAfterCompletion else {
+                return false
             }
-            let payload = Data(outbound.description.utf8)
-            record.buffer.append(BufferedEvent(id: outbound.id!, payload: payload))
-            if record.buffer.count > bufferCapacity {
-                record.buffer.removeFirst(record.buffer.count - bufferCapacity)
-            }
-            record.continuation?.yield(payload)
-        } else {
-            record.continuation?.yield(Data(outbound.description.utf8))
-        }
 
-        record.lastActivityAt = Date()
-        streams[streamID] = record
-        return true
+            var outbound = message
+            if record.replayable, outbound.isReplayableDataEvent {
+                let eventID: String
+                if let existing = outbound.id {
+                    eventID = existing
+                } else {
+                    eventID = SSEEventID(streamID: streamID, sequence: record.nextSequence).description
+                    record.nextSequence += 1
+                    outbound.id = eventID
+                }
+                let payload = Data(outbound.description.utf8)
+                record.buffer.append(BufferedEvent(id: eventID, payload: payload))
+                if record.buffer.count > bufferCapacity {
+                    record.buffer.removeFirst(record.buffer.count - bufferCapacity)
+                }
+                record.continuation?.yield(payload)
+            } else {
+                record.continuation?.yield(Data(outbound.description.utf8))
+            }
+
+            record.lastActivityAt = Date()
+            return true
+        }
+        return accepted ?? false
     }
 
     /// Route an SSE comment (keep-alive) to a stream. Comments are never buffered.
@@ -260,17 +294,22 @@ public final class SSEStreamHub {
     }
 
     private func sendPrimingEvent(to streamID: UUID) {
-        guard var record = streams[streamID] else {
+        let eventID = withRecord(streamID) { record -> SSEEventID in
+            let eventID = SSEEventID(streamID: streamID, sequence: record.nextSequence)
+            record.nextSequence += 1
+            return eventID
+        }
+        guard let eventID else {
             return
         }
-        let eventID = SSEEventID(streamID: streamID, sequence: record.nextSequence)
-        record.nextSequence += 1
-        streams[streamID] = record
+        // Outside withRecord: send re-enters the hub for this stream.
         _ = send(SSEMessage(data: "", id: eventID.description), to: streamID)
     }
 
     // MARK: - Queries
 
+    /// Whether the stream currently has a live connection and open continuation;
+    /// `false` for unknown ids.
     public func isActive(streamID: UUID) -> Bool {
         streams[streamID]?.isActive ?? false
     }

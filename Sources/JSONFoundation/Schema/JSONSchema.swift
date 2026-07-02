@@ -16,8 +16,8 @@ public indirect enum JSONSchema: Sendable {
         /// The properties of the type
         public var properties: [String: JSONSchema]
 
-        /// Which if the properties are mandatory
-        public var required: [String] = []
+        /// Which of the properties are mandatory
+        public var required: [String]
 
         /// Title of the type
         public var title: String?
@@ -25,8 +25,8 @@ public indirect enum JSONSchema: Sendable {
         /// Description of the type
         public var description: String?
 
-        /// Whether additional properties are allowed
-        public var additionalProperties: Bool? = false
+        /// Whether additional properties are allowed (`nil` omits the key from the schema)
+        public var additionalProperties: Bool?
 
         /// public initializer
         public init(

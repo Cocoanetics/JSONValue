@@ -49,4 +49,64 @@ struct JSONRPCMessageCodecTests {
             Issue.record("unexpected error type: \(error)")
         }
     }
+
+    // MARK: - Malformed single messages
+
+    /// Decodes a payload expected to be malformed and returns the
+    /// `DecodingError` it threw, recording an issue (and returning `nil`) if it
+    /// decoded or threw something else.
+    private func decodingFailure(of json: String) -> DecodingError? {
+        do {
+            _ = try JSONRPCMessage.decodeMessages(from: Data(json.utf8))
+            Issue.record("expected decodeMessages to throw for \(json)")
+        } catch let error as DecodingError {
+            return error
+        } catch {
+            Issue.record("unexpected error type: \(error)")
+        }
+        return nil
+    }
+
+    /// An object with no keys fails on the one field every message shape
+    /// requires.
+    @Test func emptyObjectFailsOnMissingJSONRPCKey() {
+        guard let error = decodingFailure(of: "{}") else { return }
+        guard case .keyNotFound(let key, _) = error else {
+            Issue.record("expected keyNotFound, got \(error)")
+            return
+        }
+        #expect(key.stringValue == "jsonrpc")
+    }
+
+    /// A `result` shape without an `id` is spec-invalid: the codec's dedicated
+    /// missing-id path must fire rather than misclassifying the message.
+    @Test func responseWithoutIDIsRejected() {
+        guard let error = decodingFailure(of: #"{"jsonrpc":"2.0","result":1}"#) else { return }
+        guard case .dataCorrupted(let context) = error else {
+            Issue.record("expected dataCorrupted, got \(error)")
+            return
+        }
+        #expect(context.debugDescription.contains("id"))
+    }
+
+    /// With none of `method`/`result`/`error` present, the key sniff cannot
+    /// classify the message and must say so.
+    @Test func objectWithoutDiscriminatorKeyIsRejected() {
+        guard let error = decodingFailure(of: #"{"jsonrpc":"2.0"}"#) else { return }
+        guard case .dataCorrupted(let context) = error else {
+            Issue.record("expected dataCorrupted, got \(error)")
+            return
+        }
+        #expect(context.debugDescription.contains("message type"))
+    }
+
+    /// A boolean id matches neither wire form `JSONRPCID` accepts.
+    @Test func booleanIDIsRejectedAsTypeMismatch() {
+        guard let error = decodingFailure(of: #"{"jsonrpc":"2.0","id":true,"method":"m"}"#) else { return }
+        guard case .typeMismatch(let type, _) = error else {
+            Issue.record("expected typeMismatch, got \(error)")
+            return
+        }
+        #expect(type is JSONRPCID.Type)
+    }
 }

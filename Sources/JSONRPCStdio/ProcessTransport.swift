@@ -33,13 +33,14 @@ public enum ProcessTransportError: Error, LocalizedError {
 
 /// A ``JSONRPCMessageTransport`` backed by `Foundation.Process` — the
 /// zero-dependency stdio transport, always available (no `Subprocess` trait).
+/// Ships in the `JSONRPCStdio` module/product.
 ///
-/// It shares the framing layer with ``StdioMessageTransport`` (it's generic over
+/// It shares the framing layer with ``StdioTransport`` (it's generic over
 /// `MessageFraming` too); only the process/IO mechanics differ. A dedicated reader
 /// thread and two `NSLock`s bridge Foundation's blocking reads and its
 /// `terminationHandler` callback — the very machinery the `swift-subprocess`-based
-/// ``StdioMessageTransport`` removes. Prefer the latter (trait `Subprocess`) for
-/// cross-platform, lock-free I/O; this one needs no dependency.
+/// ``StdioTransport`` (module `JSONRPCSubprocess`, trait `Subprocess`) removes.
+/// Prefer that one for cross-platform, lock-free I/O; this one needs no dependency.
 public final class ProcessTransport<Framing: MessageFraming>: JSONRPCMessageTransport, @unchecked Sendable {
     private let framing: Framing
     private let process = Process()
@@ -115,22 +116,16 @@ public final class ProcessTransport<Framing: MessageFraming>: JSONRPCMessageTran
         let framing = self.framing
         return AsyncThrowingStream { continuation in
             let handle = stdoutPipe.fileHandleForReading
-            let thread = Thread {
-                var decoder = framing
-                while true {
-                    let chunk = handle.availableData
-                    if chunk.isEmpty { break } // EOF: child closed stdout
-                    for body in decoder.push(chunk) {
-                        for message in (try? JSONRPCMessage.decodeMessages(from: body)) ?? [] {
-                            continuation.yield(message)
-                        }
+            startFramedReaderThread(
+                name: "jsonrpc.process.reader",
+                framing: framing,
+                readChunk: { handle.availableData }, // empty on EOF: child closed stdout
+                onBody: { body in
+                    for message in (try? JSONRPCMessage.decodeMessages(from: body)) ?? [] {
+                        continuation.yield(message)
                     }
-                }
-                continuation.finish()
-            }
-            thread.name = "jsonrpc.process.reader"
-            thread.stackSize = 4 << 20
-            thread.start()
+                },
+                onEOF: { continuation.finish() })
 
             continuation.onTermination = { [weak self] _ in
                 self?.close()
